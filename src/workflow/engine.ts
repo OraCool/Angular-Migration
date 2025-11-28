@@ -76,24 +76,9 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     title: 'Pre-Migration Backup',
     description: 'Create a full backup of the current codebase',
     requiresConfirmation: false,
-    requiresBackup: true,
-    actions: [
-      {
-        type: 'script',
-        name: 'create-backup',
-        scriptPath: './scripts/backup.sh',
-        description: 'Create timestamped backup',
-      },
-    ],
-    validations: [
-      {
-        type: 'custom',
-        name: 'verify-backup',
-        scriptPath: './scripts/verify-backup.sh',
-        failOnError: true,
-        description: 'Verify backup was created successfully',
-      },
-    ],
+    requiresBackup: false, // Don't double-backup - the handler creates it
+    actions: [],
+    validations: [],
   },
 
   {

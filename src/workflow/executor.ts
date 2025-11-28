@@ -280,16 +280,48 @@ export class WorkflowExecutor {
       `angular-backup-${timestamp}`
     );
 
+    // Use rsync to exclude build artifacts and dependencies
     const result = await this.runCommand(
-      `cp -R "${this.context.projectPath}" "${backupPath}"`
+      `rsync -av --exclude='node_modules' --exclude='dist' --exclude='.angular' --exclude='coverage' --exclude='.git' "${this.context.projectPath}/" "${backupPath}/"`
     );
 
     if (!result.success) {
       throw new Error(`Backup failed: ${result.error}`);
     }
 
+    // Add backup folders to .gitignore
+    await this.updateGitignore();
+
     this.engine.setBackupPath(backupPath);
     return backupPath;
+  }
+
+  /**
+   * Update .gitignore to exclude backup folders
+   */
+  private async updateGitignore(): Promise<void> {
+    const gitignorePath = path.join(this.context.projectPath, '..', '.gitignore');
+    const backupPattern = 'angular-backup-*';
+
+    try {
+      let content = '';
+      try {
+        content = await fs.readFile(gitignorePath, 'utf-8');
+      } catch {
+        // .gitignore doesn't exist, create new
+      }
+
+      // Check if pattern already exists
+      if (!content.includes(backupPattern)) {
+        // Add backup pattern with comment
+        const newContent = content.trim() + (content ? '\n\n' : '') + 
+          '# Angular migration backups\n' + backupPattern + '\n';
+        await fs.writeFile(gitignorePath, newContent, 'utf-8');
+      }
+    } catch (error) {
+      // Ignore gitignore errors - not critical
+      process.stderr.write(`Warning: Could not update .gitignore: ${error}\n`);
+    }
   }
 
   /**

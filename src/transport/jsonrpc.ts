@@ -147,10 +147,28 @@ export class JsonRpcTransport {
    * Send a notification to the client (no response expected)
    */
   sendNotification(method: string, params: Record<string, unknown>): void {
-    this.send({
-      jsonrpc: '2.0',
+    const msg = {
+      jsonrpc: '2.0' as const,
       method,
       params,
+    };
+    const json = JSON.stringify(msg);
+    process.stderr.write(`[Transport] Sending notification: ${method}, length: ${json.length}\n`);
+    this.send(msg);
+    process.stderr.write(`[Transport] Notification sent to stdout\n`);
+  }
+
+  /**
+   * Ensure all writes are flushed to stdout
+   */
+  async flush(): Promise<void> {
+    return new Promise((resolve) => {
+      if (process.stdout.writableNeedDrain) {
+        process.stdout.once('drain', resolve);
+      } else {
+        // Small delay to ensure writes complete
+        setImmediate(resolve);
+      }
     });
   }
 

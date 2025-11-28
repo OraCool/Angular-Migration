@@ -114,6 +114,8 @@ class AngularMigrationAgent {
   }
 
   private async handlePrompt(request: PromptRequest): Promise<PromptResponse> {
+    process.stderr.write(`[Agent] handlePrompt called for session ${request.sessionId}\n`);
+    
     const session = this.sessions.get(request.sessionId);
     if (!session) {
       throw new Error(`Session not found: ${request.sessionId}`);
@@ -124,36 +126,53 @@ class AngularMigrationAgent {
 
     // Extract user query
     const userQuery = this.extractTextFromPrompt(request.prompt);
+    process.stderr.write(`[Agent] User query: "${userQuery}"\n`);
 
     // Check if awaiting confirmation
     if (session.awaitingConfirmation) {
+      process.stderr.write(`[Agent] Session is awaiting confirmation, handling...\n`);
       await this.handleUserConfirmation(request.sessionId, session, userQuery);
       return { stopReason: 'end_turn' };
     }
 
     // Send thinking message
+    process.stderr.write(`[Agent] Sending initial thought...\n`);
     await this.sendThought(request.sessionId, 'Analyzing your Angular migration request...');
+    process.stderr.write(`[Agent] Thought sent\n`);
 
     // Determine the migration task
-    if (this.isStepByStepMigrationRequest(userQuery)) {
-      await this.startStepByStepMigration(request.sessionId, session, userQuery);
-    } else if (this.isMigrationAnalysisRequest(userQuery)) {
-      await this.analyzeMigrationNeeds(request.sessionId, session);
-    } else if (this.isStandaloneMigrationRequest(userQuery)) {
-      await this.migrateToStandalone(request.sessionId, session);
-    } else if (this.isControlFlowMigrationRequest(userQuery)) {
-      await this.migrateControlFlow(request.sessionId, session);
-    } else if (this.isSignalMigrationRequest(userQuery)) {
-      await this.migrateToSignals(request.sessionId, session);
-    } else if (this.isFullMigrationRequest(userQuery)) {
-      await this.performFullMigration(request.sessionId, session);
-    } else {
-      await this.provideGuidance(request.sessionId, userQuery);
-    }
+    try {
+      if (this.isStepByStepMigrationRequest(userQuery)) {
+        process.stderr.write(`[Agent] Starting step-by-step migration...\n`);
+        await this.startStepByStepMigration(request.sessionId, session, userQuery);
+        process.stderr.write(`[Agent] Step-by-step migration started\n`);
+      } else if (this.isMigrationAnalysisRequest(userQuery)) {
+        await this.analyzeMigrationNeeds(request.sessionId, session);
+      } else if (this.isStandaloneMigrationRequest(userQuery)) {
+        await this.migrateToStandalone(request.sessionId, session);
+      } else if (this.isControlFlowMigrationRequest(userQuery)) {
+        await this.migrateControlFlow(request.sessionId, session);
+      } else if (this.isSignalMigrationRequest(userQuery)) {
+        await this.migrateToSignals(request.sessionId, session);
+      } else if (this.isFullMigrationRequest(userQuery)) {
+        await this.performFullMigration(request.sessionId, session);
+      } else {
+        await this.provideGuidance(request.sessionId, userQuery);
+      }
 
-    return {
-      stopReason: 'end_turn',
-    };
+      // Add significant delay to ensure all notifications are sent AND processed before closing response
+      process.stderr.write(`[Agent] Waiting for notifications to be processed before returning response...\n`);
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Increased to 1 second
+      
+      process.stderr.write(`[Agent] Returning response, awaiting=${!!session.awaitingConfirmation}\n`);
+      return {
+        stopReason: 'end_turn',
+      };
+    } catch (error) {
+      process.stderr.write(`[Agent] ERROR in handlePrompt: ${error}\n`);
+      await this.sendMessage(request.sessionId, `❌ Error: ${error instanceof Error ? error.message : String(error)}`);
+      return { stopReason: 'end_turn' };
+    }
   }
 
   private async handleUserConfirmation(
@@ -213,10 +232,8 @@ class AngularMigrationAgent {
       customFolder,
     });
 
-    // Set awaiting confirmation flag
-    session.awaitingConfirmation = {
-      type: 'workflow-step',
-    };
+    // Don't set awaiting confirmation here - the workflow handler manages it
+    // session.awaitingConfirmation will be set by the handler when needed
   }
 
   private async handleCancel(params: { sessionId: SessionId }): Promise<void> {
@@ -693,31 +710,27 @@ Just tell me what you need, and I'll help guide you through the migration!`;
 
   private async sendMessage(sessionId: SessionId, text: string): Promise<void> {
     await this.sendUpdate(sessionId, {
-      type: 'agent_message_chunk',
-      chunk: {
-        content: {
-          type: 'text',
-          text,
-        },
+      sessionUpdate: 'agent_message_chunk',
+      content: {
+        type: 'text',
+        text,
       },
     });
   }
 
   private async sendThought(sessionId: SessionId, text: string): Promise<void> {
     await this.sendUpdate(sessionId, {
-      type: 'agent_thought_chunk',
-      chunk: {
-        content: {
-          type: 'text',
-          text,
-        },
+      sessionUpdate: 'agent_thought_chunk',
+      content: {
+        type: 'text',
+        text,
       },
     });
   }
 
   private async sendPlan(sessionId: SessionId, plan: Plan): Promise<void> {
     await this.sendUpdate(sessionId, {
-      type: 'plan',
+      sessionUpdate: 'plan',
       plan,
     });
   }
@@ -741,7 +754,7 @@ Just tell me what you need, and I'll help guide you through the migration!`;
     };
 
     await this.sendUpdate(sessionId, {
-      type: 'tool_call',
+      sessionUpdate: 'tool_call',
       toolCall,
     });
 
@@ -754,7 +767,7 @@ Just tell me what you need, and I'll help guide you through the migration!`;
     update: Partial<ToolCallUpdate>
   ): Promise<void> {
     await this.sendUpdate(sessionId, {
-      type: 'tool_call_update',
+      sessionUpdate: 'tool_call_update',
       update: {
         toolCallId,
         ...update,
@@ -763,10 +776,15 @@ Just tell me what you need, and I'll help guide you through the migration!`;
   }
 
   private async sendUpdate(sessionId: SessionId, update: SessionUpdate): Promise<void> {
+    process.stderr.write(`[Agent] sendUpdate called: sessionUpdate=${update.sessionUpdate}\n`);
     this.transport.sendNotification('session/update', {
       sessionId,
       update,
     });
+    process.stderr.write(`[Agent] Notification sent, flushing...\n`);
+    // Ensure notification is flushed
+    await this.transport.flush();
+    process.stderr.write(`[Agent] Flush complete\n`);
   }
 
   start(): void {

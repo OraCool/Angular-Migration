@@ -149,18 +149,35 @@ export interface Plan {
 }
 
 // ===== Session Updates =====
-export interface ContentChunk {
+export interface MessageChunkUpdate {
+  sessionUpdate: 'user_message_chunk' | 'agent_message_chunk' | 'agent_thought_chunk';
   content: ContentBlock;
   _meta?: Record<string, unknown>;
 }
 
+export interface ToolCallStartUpdate {
+  sessionUpdate: 'tool_call';
+  toolCall: ToolCall;
+  _meta?: Record<string, unknown>;
+}
+
+export interface ToolCallProgressUpdate {
+  sessionUpdate: 'tool_call_update';
+  update: ToolCallUpdate;
+  _meta?: Record<string, unknown>;
+}
+
+export interface PlanUpdate {
+  sessionUpdate: 'plan';
+  plan: Plan;
+  _meta?: Record<string, unknown>;
+}
+
 export type SessionUpdate =
-  | { type: 'user_message_chunk'; chunk: ContentChunk }
-  | { type: 'agent_message_chunk'; chunk: ContentChunk }
-  | { type: 'agent_thought_chunk'; chunk: ContentChunk }
-  | { type: 'tool_call'; toolCall: ToolCall }
-  | { type: 'tool_call_update'; update: ToolCallUpdate }
-  | { type: 'plan'; plan: Plan };
+  | MessageChunkUpdate
+  | ToolCallStartUpdate
+  | ToolCallProgressUpdate
+  | PlanUpdate;
 
 // ===== Stop Reasons =====
 export type StopReason =

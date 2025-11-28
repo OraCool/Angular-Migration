@@ -14,7 +14,11 @@ import {
 import { WorkflowExecutor } from './executor.js';
 
 export class WorkflowMigrationHandler {
-  private workflows = new Map<SessionId, { engine: WorkflowEngine; executor: WorkflowExecutor }>();
+  private workflows = new Map<SessionId, { 
+    engine: WorkflowEngine; 
+    executor: WorkflowExecutor;
+    session: SessionState;
+  }>();
 
   constructor(private transport: JsonRpcTransport) {}
 
@@ -55,7 +59,9 @@ export class WorkflowMigrationHandler {
     const engine = new WorkflowEngine(ANGULAR_MIGRATION_WORKFLOW, context);
     const executor = new WorkflowExecutor(engine, context);
 
-    this.workflows.set(sessionId, { engine, executor });
+    this.workflows.set(sessionId, { engine, executor, session });
+
+    process.stderr.write(`[Workflow] Started workflow for session ${sessionId}, path: ${context.projectPath}\n`);
 
     // Send initial plan
     await this.sendPlan(sessionId, engine);
@@ -91,19 +97,28 @@ ${options.skipTests ? '⚠️ **Tests will be skipped** (not recommended)\n' : '
         options.skipLint ? '⚠️ **Linting will be skipped**\n' : ''
       }${options.autoConfirm ? '⚠️ **Auto-confirm enabled** - no prompts\n' : ''}
 
-Ready to begin!`
+Ready to begin!
+
+**Type "proceed" or "yes" to start the first step.**`
     );
 
-    // Start executing the workflow
-    await this.executeNextStep(sessionId);
+    // Set awaiting confirmation to start
+    session.awaitingConfirmation = {
+      type: 'workflow-step',
+    };
+    
+    process.stderr.write(`[Workflow] Workflow setup complete, awaiting user confirmation to start\n`);
   }
 
   /**
    * Handle user confirmation response
    */
   async handleConfirmation(sessionId: SessionId, confirmed: boolean): Promise<void> {
+    process.stderr.write(`[Workflow] handleConfirmation called: ${confirmed}\n`);
+    
     const workflow = this.workflows.get(sessionId);
     if (!workflow) {
+      process.stderr.write(`[Workflow] ERROR: No workflow found for confirmation\n`);
       throw new Error('No active workflow for session');
     }
 
@@ -111,6 +126,7 @@ Ready to begin!`
     const currentStep = engine.getCurrentStep();
 
     if (!currentStep) {
+      process.stderr.write(`[Workflow] No current step, workflow may be complete\n`);
       await this.sendMessage(sessionId, '✅ Migration workflow completed!');
       return;
     }
@@ -124,7 +140,12 @@ Ready to begin!`
     }
 
     // User confirmed, proceed with step
+    process.stderr.write(`[Workflow] User confirmed step ${currentStep.id}\n`);
     engine.confirmStep();
+    
+    // Clear awaiting confirmation state
+    workflow.session.awaitingConfirmation = undefined;
+    
     await this.executeCurrentStep(sessionId);
   }
 
@@ -132,26 +153,36 @@ Ready to begin!`
    * Execute the current workflow step
    */
   private async executeCurrentStep(sessionId: SessionId): Promise<void> {
+    process.stderr.write(`[Workflow] executeCurrentStep called for session ${sessionId}\n`);
+    
     const workflow = this.workflows.get(sessionId);
-    if (!workflow) return;
+    if (!workflow) {
+      process.stderr.write(`[Workflow] ERROR: No workflow found in executeCurrentStep\n`);
+      return;
+    }
 
     const { engine, executor } = workflow;
     const currentStep = engine.getCurrentStep();
 
     if (!currentStep) {
+      process.stderr.write(`[Workflow] No current step, completing workflow\n`);
       await this.completeWorkflow(sessionId);
       return;
     }
 
+    process.stderr.write(`[Workflow] Executing step: ${currentStep.id} (${currentStep.title})\n`);
     await this.sendThought(sessionId, `Starting: ${currentStep.title}`);
 
     try {
-      // Handle backup if required
-      if (currentStep.requiresBackup) {
+      // Handle backup - either explicit backup step or steps that require backup
+      if (currentStep.id === 'pre-migration-backup' || (currentStep.requiresBackup && currentStep.id !== 'pre-migration-backup')) {
+        process.stderr.write(`[Workflow] Creating backup for step ${currentStep.id}\n`);
+        
         await this.sendThought(sessionId, 'Creating backup...');
         const toolCall = await this.createToolCall(sessionId, 'Create Backup', 'execute', {});
 
         const backupPath = await executor.createBackup();
+        process.stderr.write(`[Workflow] Backup created at: ${backupPath}\n`);
 
         await this.updateToolCall(sessionId, toolCall.toolCallId, {
           status: 'completed',
@@ -160,6 +191,8 @@ Ready to begin!`
 
         await this.sendMessage(sessionId, `✅ Backup created: ${backupPath}`);
       }
+      
+      process.stderr.write(`[Workflow] Step ${currentStep.id} has ${currentStep.actions.length} actions and ${currentStep.validations.length} validations\n`);
 
       // Execute all actions in the step
       for (const action of currentStep.actions) {
@@ -238,23 +271,32 @@ Ready to begin!`
       }
 
       // Step completed successfully
+      process.stderr.write(`[Workflow] Step ${currentStep.id} completed successfully\n`);
+      
       await engine.advanceToNextStep();
       await this.sendPlan(sessionId, engine);
 
       const progress = engine.getProgress();
+      process.stderr.write(`[Workflow] Progress: ${progress.current}/${progress.total} (${progress.percentage}%)\n`);
+      
       await this.sendMessage(
         sessionId,
         `✅ **${currentStep.title}** completed!\n\nProgress: ${progress.current}/${progress.total} steps (${progress.percentage}%)`
       );
 
+      // Small delay to ensure messages are sent
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Move to next step
+      process.stderr.write(`[Workflow] Moving to next step after ${currentStep.id}\n`);
       await this.executeNextStep(sessionId);
     } catch (error) {
       // Step failed
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`[Workflow] ERROR in step ${currentStep.id}: ${errorMessage}\n`);
+      
       engine.markStepFailed(currentStep.id);
       await this.sendPlan(sessionId, engine);
-
-      const errorMessage = error instanceof Error ? error.message : String(error);
 
       await this.sendMessage(
         sessionId,
@@ -275,11 +317,18 @@ Ready to begin!`
    * Execute the next step (handles confirmation if needed)
    */
   private async executeNextStep(sessionId: SessionId): Promise<void> {
+    process.stderr.write(`[Workflow] executeNextStep called for session ${sessionId}\n`);
+    
     const workflow = this.workflows.get(sessionId);
-    if (!workflow) return;
+    if (!workflow) {
+      process.stderr.write(`[Workflow] ERROR: No workflow found for session ${sessionId}\n`);
+      return;
+    }
 
     const { engine } = workflow;
     const currentStep = engine.getCurrentStep();
+    
+    process.stderr.write(`[Workflow] Current step: ${currentStep ? currentStep.id : 'NULL'}\n`);
 
     if (!currentStep) {
       await this.completeWorkflow(sessionId);
@@ -288,15 +337,22 @@ Ready to begin!`
 
     // Check if step requires confirmation
     if (currentStep.requiresConfirmation) {
+      process.stderr.write(`[Workflow] Step ${currentStep.id} requires confirmation\n`);
       const confirmationMessage = engine.getConfirmationMessage();
       if (confirmationMessage) {
         await this.sendMessage(sessionId, confirmationMessage);
+        // Set session to await confirmation
+        workflow.session.awaitingConfirmation = {
+          type: 'workflow-step',
+        };
+        process.stderr.write(`[Workflow] Awaiting user confirmation for step ${currentStep.id}\n`);
         // Wait for user response (will be handled by handleConfirmation)
         return;
       }
     }
 
     // No confirmation needed, execute immediately
+    process.stderr.write(`[Workflow] No confirmation needed, executing step ${currentStep.id} immediately\n`);
     await this.executeCurrentStep(sessionId);
   }
 
@@ -412,40 +468,42 @@ A detailed migration report has been generated in your project directory.
     this.transport.sendNotification('session/update', {
       sessionId,
       update: {
-        type: 'agent_message_chunk',
-        chunk: {
-          content: {
-            type: 'text',
-            text,
-          },
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'text',
+          text,
         },
       },
     });
+    // Ensure notification is written
+    await this.transport.flush();
   }
 
   private async sendThought(sessionId: SessionId, text: string): Promise<void> {
     this.transport.sendNotification('session/update', {
       sessionId,
       update: {
-        type: 'agent_thought_chunk',
-        chunk: {
-          content: {
-            type: 'text',
-            text,
-          },
+        sessionUpdate: 'agent_thought_chunk',
+        content: {
+          type: 'text',
+          text,
         },
       },
     });
+    // Ensure notification is written
+    await this.transport.flush();
   }
 
   private async sendPlan(sessionId: SessionId, engine: WorkflowEngine): Promise<void> {
     this.transport.sendNotification('session/update', {
       sessionId,
       update: {
-        type: 'plan',
+        sessionUpdate: 'plan',
         plan: engine.getPlan(),
       },
     });
+    // Ensure notification is written
+    await this.transport.flush();
   }
 
   private async createToolCall(
@@ -459,7 +517,7 @@ A detailed migration report has been generated in your project directory.
     this.transport.sendNotification('session/update', {
       sessionId,
       update: {
-        type: 'tool_call',
+        sessionUpdate: 'tool_call',
         toolCall: {
           toolCallId,
           title,
@@ -471,6 +529,9 @@ A detailed migration report has been generated in your project directory.
         },
       },
     });
+
+    // Ensure notification is written
+    await this.transport.flush();
 
     return { toolCallId };
   }
@@ -488,12 +549,15 @@ A detailed migration report has been generated in your project directory.
     this.transport.sendNotification('session/update', {
       sessionId,
       update: {
-        type: 'tool_call_update',
+        sessionUpdate: 'tool_call_update',
         update: {
           toolCallId,
           ...update,
         },
       },
     });
+    
+    // Ensure notification is written
+    await this.transport.flush();
   }
 }
