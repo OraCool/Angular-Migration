@@ -12,6 +12,7 @@ import {
   ANGULAR_MIGRATION_WORKFLOW,
 } from './engine.js';
 import { WorkflowExecutor } from './executor.js';
+import { generateEnhancedErrorMessage, getRecommendedScripts } from './issue-mapper.js';
 
 export class WorkflowMigrationHandler {
   private workflows = new Map<SessionId, { 
@@ -291,16 +292,19 @@ Ready to begin!
       process.stderr.write(`[Workflow] Moving to next step after ${currentStep.id}\n`);
       await this.executeNextStep(sessionId);
     } catch (error) {
-      // Step failed
+      // Step failed - use enhanced error messaging
       const errorMessage = error instanceof Error ? error.message : String(error);
       process.stderr.write(`[Workflow] ERROR in step ${currentStep.id}: ${errorMessage}\n`);
       
       engine.markStepFailed(currentStep.id);
       await this.sendPlan(sessionId, engine);
 
+      // Generate enhanced error message with agent recommendations
+      const enhancedError = generateEnhancedErrorMessage(errorMessage);
+      
       await this.sendMessage(
         sessionId,
-        `❌ **Step failed:** ${currentStep.title}\n\n**Error:** ${errorMessage}\n\n**Options:**\n1. Retry this step\n2. Rollback to previous backup\n3. Skip this step (not recommended)\n4. Cancel migration`
+        `${enhancedError}\n\n**Options:**\n1. Retry this step\n2. Rollback to previous backup\n3. Skip this step (not recommended)\n4. Cancel migration`
       );
 
       // Check if rollback is available

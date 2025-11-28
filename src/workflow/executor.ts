@@ -13,6 +13,21 @@ import type {
   WorkflowContext,
 } from './engine.js';
 
+/**
+ * Resolve workshop root path from environment or default location
+ */
+function getWorkshopRoot(): string {
+  return process.env.WORKSHOP_ROOT || '/Users/siarheiskuratovich/dev/AI/migrations/angmig/workshop';
+}
+
+/**
+ * Resolve workshop script path
+ */
+function resolveWorkshopScript(scriptName: string): string {
+  const workshopRoot = getWorkshopRoot();
+  return path.join(workshopRoot, 'scripts', scriptName);
+}
+
 export interface ExecutionResult {
   success: boolean;
   output: string;
@@ -93,7 +108,7 @@ export class WorkflowExecutor {
       if (validation.scriptPath) {
         result = await this.runScript(
           validation.scriptPath,
-          undefined,
+          validation.args,
           this.context.projectPath
         );
       } else if (validation.command) {
@@ -205,10 +220,15 @@ export class WorkflowExecutor {
             duration: 0,
           });
         } else {
+          // If command failed but stderr is empty, use stdout or generic message
+          const errorMessage = code !== 0 
+            ? (stderr || stdout || `Command exited with code ${code}`)
+            : undefined;
+          
           resolve({
             success: code === 0,
             output: stdout,
-            error: stderr || undefined,
+            error: errorMessage,
             exitCode: code || 0,
             duration: 0,
           });
@@ -231,7 +251,7 @@ export class WorkflowExecutor {
   }
 
   /**
-   * Run a shell script
+   * Run a shell script (resolves workshop paths automatically)
    */
   private async runScript(
     scriptPath: string,
@@ -239,10 +259,12 @@ export class WorkflowExecutor {
     cwd?: string,
     timeout?: number
   ): Promise<ExecutionResult> {
-    // Resolve script path relative to project or absolute
-    const resolvedPath = path.isAbsolute(scriptPath)
-      ? scriptPath
-      : path.join(this.context.projectPath, scriptPath);
+    // If path starts with './scripts/', resolve from workshop root
+    const resolvedPath = scriptPath.startsWith('./scripts/') 
+      ? resolveWorkshopScript(path.basename(scriptPath))
+      : path.isAbsolute(scriptPath)
+        ? scriptPath
+        : path.join(this.context.projectPath, scriptPath);
 
     // Check if script exists
     try {
