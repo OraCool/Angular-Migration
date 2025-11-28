@@ -198,7 +198,7 @@ cd /path/to/your/angular-project
 zed .
 ```
 
-The agent uses the current working directory (cwd) to know where your project is located.
+The agent uses the current working directory (cwd) as the default project location. You can also specify a custom folder within your project during migration.
 
 ### 3.2 Create an Angular Migration Thread
 
@@ -231,6 +231,19 @@ run step-by-step migration
 ```
 
 Initiates the full 11-step workflow with confirmations at each stage.
+
+**Migrate a specific folder:**
+```
+run step-by-step migration in current_app
+```
+
+or
+
+```
+run step-by-step migration in subfolder/my-app
+```
+
+The agent will migrate the specified folder instead of the entire project. Paths can be relative (to the opened project) or absolute.
 
 #### Get Migration Guidance
 ```
@@ -371,18 +384,19 @@ A detailed migration report has been generated in your project directory:
 - Angular version: 14 → 20 ✅
 - Components migrated: 47
 - Templates updated: 32
-- Build status: Passing ✅
+- BuCustom Project Folder
 
-## Next Steps
-1. Review MIGRATION_REPORT.md
-2. Run tests: npm test
-3. Test your application manually
-4. Commit changes: git commit
+Migrate a specific folder within your project:
+
+```
+run step-by-step migration in my-app
 ```
 
----
+Use absolute paths if needed:
 
-## Step 5: Configuration Options
+```
+run step-by-step migration in /Users/you/projects/angular-app
+```
 
 ### Skip Tests During Migration
 
@@ -390,6 +404,21 @@ A detailed migration report has been generated in your project directory:
 run migration workflow skip tests
 ```
 
+**Note:** Not recommended for production migrations!
+
+### Skip Linting
+
+```
+run migration workflow skip lint
+```
+
+### Multiple Options
+
+```
+run migration workflow in my-app skip tests skip lint
+```
+
+You can combine folder specification with other options.
 **Note:** Not recommended for production migrations!
 
 ### Skip Linting
@@ -426,7 +455,8 @@ Main responses and information.
 **3. Tool Calls (highlighted boxes)**
 ```
 🔧 Scanning Angular project
-Status: Completed ✅
+StatuOr specify a folder: run step-by-step migration in my-app
+   → s: Completed ✅
 Output: { components: 47, modules: 15 }
 ```
 Shows actions being performed.
@@ -691,7 +721,8 @@ Agent: ⚙️ Running: ng update @angular/core@15 @angular/cli@15
 [... continues through all 11 steps ...]
 
 Agent: # 🎉 Migration Complete!
-       
+       (entire project) |
+| `run migration in folder_name` | Migrate specific folder 
        Successfully completed 11/11 steps
        
        Check MIGRATION_REPORT.md for details.
