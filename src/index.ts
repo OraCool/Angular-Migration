@@ -5,6 +5,7 @@
  * Handles Angular 14 → 20 migration via Agent Client Protocol
  */
 
+import { logConfig } from './config.js';
 import { JsonRpcTransport } from './transport/jsonrpc.js';
 import type {
   PROTOCOL_VERSION,
@@ -31,7 +32,7 @@ export interface SessionState {
   currentPlan?: Plan;
   activeToolCalls: Map<string, ToolCall>;
   awaitingConfirmation?: {
-    type: 'workflow-step' | 'rollback' | 'skip-step';
+    type: 'workflow-step' | 'rollback' | 'skip-step' | 'resume-choice';
     data?: unknown;
   };
 }
@@ -800,6 +801,7 @@ Just tell me what you need, and I'll help guide you through the migration!`;
 
   start(): void {
     // Agent is ready and listening on stdin/stdout
+    logConfig();
     process.stderr.write('[Angular Migration Agent] Started and ready\n');
   }
 }

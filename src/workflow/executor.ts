@@ -14,20 +14,13 @@ import type {
 } from './engine.js';
 import { LLMFixerService } from '../services/llm-fixer.js';
 import { findPatternFix } from '../services/pattern-fixer.js';
-
-/**
- * Resolve workshop root path from environment or default location
- */
-function getWorkshopRoot(): string {
-  return process.env.WORKSHOP_ROOT || '/Users/siarheiskuratovich/dev/AI/migrations/angmig/workshop';
-}
+import { config } from '../config.js';
 
 /**
  * Resolve workshop script path
  */
 function resolveWorkshopScript(scriptName: string): string {
-  const workshopRoot = getWorkshopRoot();
-  return path.join(workshopRoot, 'scripts', scriptName);
+  return path.join(config.workshopRoot, 'scripts', scriptName);
 }
 
 export interface ExecutionResult {
@@ -52,9 +45,8 @@ export class WorkflowExecutor {
     private context: WorkflowContext,
     callbacks?: ExecutorCallbacks
   ) {
-    const workshopRoot = getWorkshopRoot();
     this.callbacks = callbacks;
-    this.llmFixer = new LLMFixerService(workshopRoot, true, callbacks); // Enable LLM with messaging
+    this.llmFixer = new LLMFixerService(config.workshopRoot, true, callbacks); // Enable LLM with messaging
   }
 
   /**
@@ -505,7 +497,7 @@ export class WorkflowExecutor {
       const fixResult = await this.llmFixer.fixError({
         error: errorToFix,
         errorType: 'Build Errors', // TODO: detect from error
-        workshopRoot: getWorkshopRoot(),
+        workshopRoot: config.workshopRoot,
         angularVersion: this.context.currentVersion,
       });
       

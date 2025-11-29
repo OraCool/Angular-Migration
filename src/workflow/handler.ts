@@ -14,16 +14,20 @@ import {
 import { WorkflowExecutor } from './executor.js';
 import { generateEnhancedErrorMessage, getRecommendedScripts } from './issue-mapper.js';
 import { validateNodeVersion, switchNodeVersion, installNodeVersion } from '../utils/node-version-checker.js';
+import { StateManager } from './state-manager.js';
 
 export class WorkflowMigrationHandler {
-  private workflows = new Map<SessionId, { 
-    engine: WorkflowEngine; 
+  private workflows = new Map<SessionId, {
+    engine: WorkflowEngine;
     executor: WorkflowExecutor;
     session: SessionState;
     projectPath: string; // Store project path for easy access
   }>();
+  private stateManager: StateManager;
 
-  constructor(private transport: JsonRpcTransport) {}
+  constructor(private transport: JsonRpcTransport) {
+    this.stateManager = new StateManager();
+  }
 
   /**
    * Start a new step-by-step migration workflow
@@ -41,6 +45,51 @@ export class WorkflowMigrationHandler {
       resumeFromStep?: string | number; // Step ID or index to resume from
     }
   ): Promise<void> {
+    // Check for existing checkpoint first
+    const checkpoint = await this.stateManager.loadCheckpoint(sessionId);
+
+    if (checkpoint && !options.resumeFromStep) {
+      // Found existing checkpoint - ask user if they want to resume
+      const completedSteps = checkpoint.state.completedSteps.length;
+      const totalSteps = ANGULAR_MIGRATION_WORKFLOW.length;
+      const lastCompleted = checkpoint.state.completedSteps.slice(-1)[0] || 'none';
+      const currentStepIndex = checkpoint.state.currentStepIndex;
+      const currentStepTitle = currentStepIndex < totalSteps
+        ? ANGULAR_MIGRATION_WORKFLOW[currentStepIndex].title
+        : 'Complete';
+
+      await this.sendMessage(
+        sessionId,
+        `## 🔄 Previous Migration Found
+
+A previous migration was interrupted for this session:
+- **Last completed step:** ${lastCompleted}
+- **Next step:** ${currentStepTitle}
+- **Progress:** ${completedSteps}/${totalSteps} steps completed (${Math.round((completedSteps / totalSteps) * 100)}%)
+- **Timestamp:** ${new Date(checkpoint.timestamp).toLocaleString()}
+- **Project:** \`${checkpoint.context.projectPath}\`
+
+**Options:**
+1. **Resume** - Continue from where you left off
+2. **Start Fresh** - Discard progress and begin new migration
+
+Type **"resume"** to continue or **"fresh"** to restart.`
+      );
+
+      // Set awaiting confirmation state
+      session.awaitingConfirmation = {
+        type: 'resume-choice',
+        data: checkpoint,
+      };
+      return;
+    }
+
+    // If resuming from checkpoint
+    if (options.resumeFromStep === 'resume' || checkpoint) {
+      await this.resumeFromCheckpoint(sessionId, session, checkpoint!);
+      return;
+    }
+
     // Determine project path - use custom folder if provided, otherwise use session cwd
     let projectPath = session.cwd;
     if (options.customFolder) {
@@ -59,7 +108,7 @@ export class WorkflowMigrationHandler {
         `🔍 Detected Angular version: **${currentVersion}**`
       );
     }
-    
+
     const context: WorkflowContext = {
       sessionId,
       projectPath,
@@ -70,7 +119,7 @@ export class WorkflowMigrationHandler {
       autoConfirm: options.autoConfirm,
     };
 
-    const engine = new WorkflowEngine(ANGULAR_MIGRATION_WORKFLOW, context);
+    const engine = new WorkflowEngine(ANGULAR_MIGRATION_WORKFLOW, context, this.stateManager);
     const executor = new WorkflowExecutor(engine, context, {
       sendThought: (msg) => this.sendThought(sessionId, msg),
       sendMessage: (msg) => this.sendMessage(sessionId, msg),
@@ -164,13 +213,34 @@ Ready to begin!
   /**
    * Handle user confirmation response
    */
-  async handleConfirmation(sessionId: SessionId, confirmed: boolean): Promise<void> {
-    process.stderr.write(`[Workflow] handleConfirmation called: ${confirmed}\n`);
-    
+  async handleConfirmation(sessionId: SessionId, confirmed: boolean, message?: string): Promise<void> {
+    process.stderr.write(`[Workflow] handleConfirmation called: ${confirmed}, message: ${message}\n`);
+
     const workflow = this.workflows.get(sessionId);
     if (!workflow) {
       process.stderr.write(`[Workflow] ERROR: No workflow found for confirmation\n`);
       throw new Error('No active workflow for session');
+    }
+
+    const { session } = workflow;
+
+    // Handle resume/fresh choice
+    if (session.awaitingConfirmation?.type === 'resume-choice') {
+      const choice = (message || '').toLowerCase().trim();
+
+      if (choice === 'resume') {
+        await this.handleResumeChoice(sessionId, session, session.awaitingConfirmation.data);
+        return;
+      } else if (choice === 'fresh') {
+        await this.handleFreshStart(sessionId, session);
+        return;
+      } else {
+        await this.sendMessage(
+          sessionId,
+          `⚠️ Invalid choice. Please type **"resume"** or **"fresh"**.`
+        );
+        return;
+      }
     }
 
     const { engine } = workflow;
@@ -193,10 +263,10 @@ Ready to begin!
     // User confirmed, proceed with step
     process.stderr.write(`[Workflow] User confirmed step ${currentStep.id}\n`);
     engine.confirmStep();
-    
+
     // Clear awaiting confirmation state
     workflow.session.awaitingConfirmation = undefined;
-    
+
     await this.executeCurrentStep(sessionId);
   }
 
@@ -527,6 +597,76 @@ Ready to begin!
   }
 
   /**
+   * Resume workflow from existing checkpoint
+   */
+  private async resumeFromCheckpoint(
+    sessionId: SessionId,
+    session: SessionState,
+    checkpoint: any
+  ): Promise<void> {
+    const engine = await WorkflowEngine.fromCheckpoint(sessionId, this.stateManager);
+
+    if (!engine) {
+      await this.sendMessage(
+        sessionId,
+        '❌ Failed to restore from checkpoint. Starting fresh migration.'
+      );
+      return;
+    }
+
+    const { context } = StateManager.deserializeState(checkpoint);
+    const executor = new WorkflowExecutor(engine, context, {
+      sendThought: (msg) => this.sendThought(sessionId, msg),
+      sendMessage: (msg) => this.sendMessage(sessionId, msg),
+    });
+
+    this.workflows.set(sessionId, {
+      engine,
+      executor,
+      session,
+      projectPath: context.projectPath,
+    });
+
+    await this.sendMessage(
+      sessionId,
+      `✅ Resumed from checkpoint!\n\n**Next step:** ${engine.getCurrentStep()?.title || 'Complete'}\n\nReady to continue!`
+    );
+
+    await this.sendPlan(sessionId, engine);
+    await this.executeNextStep(sessionId);
+  }
+
+  /**
+   * Handle user choice to resume from checkpoint
+   */
+  private async handleResumeChoice(
+    sessionId: SessionId,
+    session: SessionState,
+    checkpoint: any
+  ): Promise<void> {
+    session.awaitingConfirmation = undefined;
+    await this.resumeFromCheckpoint(sessionId, session, checkpoint);
+  }
+
+  /**
+   * Handle user choice to start fresh (discard checkpoint)
+   */
+  private async handleFreshStart(
+    sessionId: SessionId,
+    session: SessionState
+  ): Promise<void> {
+    session.awaitingConfirmation = undefined;
+
+    // Delete existing checkpoint
+    await this.stateManager.deleteCheckpoint(sessionId);
+
+    await this.sendMessage(
+      sessionId,
+      `🗑️ Previous checkpoint deleted.\n\nStarting fresh migration. Please run the migration command again.`
+    );
+  }
+
+  /**
    * Complete the workflow
    */
   private async completeWorkflow(sessionId: SessionId): Promise<void> {
@@ -582,8 +722,10 @@ A detailed migration report has been generated in your project directory.
 **Need help?** Just ask!`
     );
 
-    // Clean up workflow
+    // Clean up workflow and checkpoint
     this.workflows.delete(sessionId);
+    await this.stateManager.deleteCheckpoint(sessionId);
+    process.stderr.write(`[Workflow] ✅ Workflow completed and checkpoint cleaned up\n`);
   }
 
   /**

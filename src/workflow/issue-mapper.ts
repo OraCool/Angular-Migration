@@ -4,6 +4,8 @@
  * Based on workshop/docs/guides/issue-agent-mapping.md
  */
 
+import { config } from '../config.js';
+
 export interface IssueMapping {
   pattern: RegExp;
   category: string;
@@ -203,7 +205,7 @@ export function findAgentForError(errorMessage: string): IssueMapping | null {
  */
 export function generateEnhancedErrorMessage(
   error: string,
-  workshopRoot: string = '/Users/siarheiskuratovich/dev/AI/migrations/angmig/workshop'
+  workshopRoot: string = config.workshopRoot
 ): string {
   const mapping = findAgentForError(error);
   

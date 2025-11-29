@@ -4,6 +4,7 @@
  */
 
 import type { SessionId, Plan, PlanEntry } from '../types/acp.js';
+import { StateManager } from './state-manager.js';
 
 export interface WorkflowStep {
   id: string;
@@ -688,11 +689,14 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
 
 export class WorkflowEngine {
   private state: WorkflowState;
+  private stateManager?: StateManager;
 
   constructor(
     private workflow: WorkflowStep[],
-    private context: WorkflowContext
+    private context: WorkflowContext,
+    stateManager?: StateManager
   ) {
+    this.stateManager = stateManager;
     this.state = {
       currentStepIndex: 0,
       completedSteps: [],
@@ -783,6 +787,22 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
       this.state.completedSteps.push(currentStep.id);
     }
     this.state.currentStepIndex++;
+
+    // Auto-save checkpoint after advancing
+    if (this.stateManager) {
+      try {
+        await this.stateManager.saveCheckpoint(
+          this.context.sessionId,
+          this.state,
+          this.context
+        );
+      } catch (error) {
+        // Log error but don't fail the workflow
+        process.stderr.write(
+          `[WorkflowEngine] ⚠️ Failed to save checkpoint: ${error}\n`
+        );
+      }
+    }
   }
 
   markStepFailed(stepId: string): void {
@@ -843,5 +863,41 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
       title: step.title,
       index,
     }));
+  }
+
+  /**
+   * Factory method to restore WorkflowEngine from checkpoint
+   */
+  static async fromCheckpoint(
+    sessionId: SessionId,
+    stateManager?: StateManager
+  ): Promise<WorkflowEngine | null> {
+    const manager = stateManager || new StateManager();
+
+    try {
+      const checkpoint = await manager.loadCheckpoint(sessionId);
+
+      if (!checkpoint) {
+        return null; // No checkpoint found
+      }
+
+      // Deserialize state and context
+      const { state, context } = StateManager.deserializeState(checkpoint);
+
+      // Create engine with restored state
+      const engine = new WorkflowEngine(ANGULAR_MIGRATION_WORKFLOW, context, manager);
+      engine.state = state;
+
+      process.stderr.write(
+        `[WorkflowEngine] ✅ Restored from checkpoint: step ${state.currentStepIndex}/${ANGULAR_MIGRATION_WORKFLOW.length}\n`
+      );
+
+      return engine;
+    } catch (error) {
+      process.stderr.write(
+        `[WorkflowEngine] ❌ Failed to restore from checkpoint: ${error}\n`
+      );
+      return null;
+    }
   }
 }
