@@ -50,3 +50,5 @@ backup-info.json
 *.temp
 .cache/
 logs
+# LangGraph API
+.langgraph_api

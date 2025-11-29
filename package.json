@@ -12,7 +12,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest",
-    "test:state": "npm run build && node dist/test-state-persistence.js"
+    "test:state": "npm run build && node dist/test-state-persistence.js",
+    "test:langgraph": "npm run build && node dist/workflow/langgraph/test-graph.js"
   },
   "keywords": [
     "acp",
@@ -25,6 +26,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@langchain/core": "^1.1.0",
+    "@langchain/langgraph": "^1.0.2",
     "@types/node": "^20.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@typescript-eslint/typescript-estree": "^7.0.0",
