@@ -11,6 +11,7 @@ import type {
   WorkflowValidation,
   ValidationResult,
   WorkflowContext,
+  RetryConfig,
 } from './engine.js';
 import { LLMFixerService } from '../services/llm-fixer.js';
 import { findPatternFix } from '../services/pattern-fixer.js';
@@ -541,6 +542,188 @@ export class WorkflowExecutor {
     const lastResults = Array.from(state.lastValidationResults.values());
     const lastFailure = lastResults.reverse().find(r => !r.success);
     return lastFailure?.error || lastFailure?.output;
+  }
+
+  /**
+   * Execute rollback actions for a step
+   */
+  async executeRollback(stepId: string): Promise<{ success: boolean; output: string }> {
+    const rollbackActions = this.engine.getRollbackActions(stepId);
+
+    if (!rollbackActions || rollbackActions.length === 0) {
+      return {
+        success: false,
+        output: `No rollback actions defined for step ${stepId}`,
+      };
+    }
+
+    process.stderr.write(`[Rollback] ⏪ Starting rollback for step ${stepId}\n`);
+    process.stderr.write(`[Rollback] Executing ${rollbackActions.length} rollback action(s)\n`);
+
+    const outputs: string[] = [];
+    let allSuccess = true;
+
+    for (const action of rollbackActions) {
+      process.stderr.write(`[Rollback] Executing: ${action.description}\n`);
+
+      const result = await this.executeAction(action);
+
+      outputs.push(`Action: ${action.description}`);
+      outputs.push(`Result: ${result.success ? '✅ Success' : '❌ Failed'}`);
+      outputs.push(result.output);
+
+      if (result.error) {
+        outputs.push(`Error: ${result.error}`);
+      }
+
+      if (!result.success) {
+        allSuccess = false;
+        process.stderr.write(`[Rollback] ⚠️ Rollback action failed: ${action.description}\n`);
+        // Continue with remaining rollback actions even if one fails
+      } else {
+        process.stderr.write(`[Rollback] ✅ Rollback action succeeded: ${action.description}\n`);
+      }
+    }
+
+    if (allSuccess) {
+      process.stderr.write(`[Rollback] ✅ Rollback completed successfully for step ${stepId}\n`);
+    } else {
+      process.stderr.write(`[Rollback] ⚠️ Rollback completed with errors for step ${stepId}\n`);
+    }
+
+    return {
+      success: allSuccess,
+      output: outputs.join('\n\n'),
+    };
+  }
+
+  /**
+   * Execute action with retry logic
+   */
+  async executeActionWithRetry(
+    action: WorkflowAction,
+    stepId: string,
+    retryConfig?: RetryConfig
+  ): Promise<ExecutionResult> {
+    return this.executeWithRetry(
+      stepId,
+      retryConfig,
+      () => this.executeAction(action),
+      (result) => this.isErrorRetryable(result.error, retryConfig?.retryableErrors)
+    );
+  }
+
+  /**
+   * Execute validation with retry logic
+   */
+  async executeValidationWithRetry(
+    validation: WorkflowValidation,
+    stepId: string,
+    retryConfig?: RetryConfig
+  ): Promise<ValidationResult> {
+    return this.executeWithRetry(
+      stepId,
+      retryConfig,
+      () => this.executeValidation(validation),
+      (result) => this.isErrorRetryable(result.error, retryConfig?.retryableErrors)
+    );
+  }
+
+  /**
+   * Generic retry wrapper with exponential backoff
+   */
+  private async executeWithRetry<T extends { success: boolean; error?: string }>(
+    stepId: string,
+    retryConfig: RetryConfig | undefined,
+    executor: () => Promise<T>,
+    isRetryable: (result: T) => boolean
+  ): Promise<T> {
+    const maxAttempts = retryConfig?.maxAttempts || 1;
+    let attempt = 1;
+
+    while (attempt <= maxAttempts) {
+      const result = await executor();
+
+      // Success - return immediately
+      if (result.success) {
+        if (attempt > 1) {
+          process.stderr.write(
+            `[Retry] ✅ Step ${stepId} succeeded on attempt ${attempt}/${maxAttempts}\n`
+          );
+          // Reset retry counter on success
+          this.engine.resetRetryAttempt(stepId);
+        }
+        return result;
+      }
+
+      // Check if error is retryable
+      if (!isRetryable(result)) {
+        process.stderr.write(
+          `[Retry] ❌ Error is not retryable for step ${stepId}\n`
+        );
+        return result;
+      }
+
+      // No more retries left
+      if (attempt >= maxAttempts) {
+        process.stderr.write(
+          `[Retry] ❌ Step ${stepId} failed after ${attempt} attempts\n`
+        );
+        return result;
+      }
+
+      // Calculate delay and retry
+      const delay = this.calculateRetryDelay(attempt, retryConfig);
+      process.stderr.write(
+        `[Retry] ⏳ Step ${stepId} failed (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms...\n`
+      );
+      if (result.error) {
+        process.stderr.write(`[Retry] Error: ${result.error.substring(0, 200)}...\n`);
+      }
+
+      await this.sleep(delay);
+      attempt++;
+
+      // Track retry in engine state
+      this.engine.incrementRetryAttempt(stepId);
+    }
+
+    // This should never be reached, but TypeScript needs it
+    throw new Error('Retry logic error: exceeded max attempts without returning');
+  }
+
+  /**
+   * Calculate retry delay with exponential backoff
+   */
+  private calculateRetryDelay(attempt: number, retryConfig?: RetryConfig): number {
+    const baseDelay = retryConfig?.delayMs || 1000;
+    const multiplier = retryConfig?.backoffMultiplier || 2;
+    const maxDelay = retryConfig?.maxDelayMs || 30000;
+
+    const delay = baseDelay * Math.pow(multiplier, attempt - 1);
+    return Math.min(delay, maxDelay);
+  }
+
+  /**
+   * Sleep for specified milliseconds
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Check if error is retryable based on error patterns
+   */
+  private isErrorRetryable(error: string | undefined, retryableErrors?: RegExp[]): boolean {
+    if (!error) {
+      return true; // No error message, allow retry
+    }
+
+    if (!retryableErrors || retryableErrors.length === 0) {
+      return true; // No patterns specified, retry all errors
+    }
+
+    return retryableErrors.some((pattern) => pattern.test(error));
   }
 }
 

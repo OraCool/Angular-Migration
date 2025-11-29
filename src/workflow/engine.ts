@@ -17,6 +17,15 @@ export interface WorkflowStep {
   actions: WorkflowAction[];
   rollbackActions?: WorkflowAction[];
   validations: WorkflowValidation[];
+  retry?: RetryConfig; // Retry configuration for this step
+}
+
+export interface RetryConfig {
+  maxAttempts: number; // Maximum retry attempts (1 = no retry, 2 = 1 retry, etc.)
+  delayMs?: number; // Initial delay before retry (default: 1000ms)
+  backoffMultiplier?: number; // Exponential backoff multiplier (default: 2)
+  maxDelayMs?: number; // Maximum delay between retries (default: 30000ms)
+  retryableErrors?: RegExp[]; // Only retry if error matches these patterns
 }
 
 export interface WorkflowAction {
@@ -53,6 +62,7 @@ export interface WorkflowState {
     message: string;
   };
   lastValidationResults: Map<string, ValidationResult>;
+  retryAttempts: Map<string, number>; // Track retry attempts per step ID
 }
 
 export interface ValidationResult {
@@ -150,6 +160,20 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     version: '15',
     requiresConfirmation: true,
     requiresBackup: false,
+    retry: {
+      maxAttempts: 3,
+      delayMs: 2000,
+      backoffMultiplier: 2,
+      maxDelayMs: 10000,
+      retryableErrors: [
+        /ETIMEDOUT/i,
+        /ECONNRESET/i,
+        /ENOTFOUND/i,
+        /fetch failed/i,
+        /network.*error/i,
+        /registry.*error/i,
+      ],
+    },
     actions: [
       {
         type: 'command',
@@ -296,6 +320,20 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     version: '16',
     requiresConfirmation: true,
     requiresBackup: false,
+    retry: {
+      maxAttempts: 3,
+      delayMs: 2000,
+      backoffMultiplier: 2,
+      maxDelayMs: 10000,
+      retryableErrors: [
+        /ETIMEDOUT/i,
+        /ECONNRESET/i,
+        /ENOTFOUND/i,
+        /fetch failed/i,
+        /network.*error/i,
+        /registry.*error/i,
+      ],
+    },
     actions: [
       {
         type: 'command',
@@ -362,6 +400,20 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     version: '17',
     requiresConfirmation: true,
     requiresBackup: false,
+    retry: {
+      maxAttempts: 3,
+      delayMs: 2000,
+      backoffMultiplier: 2,
+      maxDelayMs: 10000,
+      retryableErrors: [
+        /ETIMEDOUT/i,
+        /ECONNRESET/i,
+        /ENOTFOUND/i,
+        /fetch failed/i,
+        /network.*error/i,
+        /registry.*error/i,
+      ],
+    },
     actions: [
       {
         type: 'command',
@@ -462,6 +514,20 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     version: '18',
     requiresConfirmation: true,
     requiresBackup: false,
+    retry: {
+      maxAttempts: 3,
+      delayMs: 2000,
+      backoffMultiplier: 2,
+      maxDelayMs: 10000,
+      retryableErrors: [
+        /ETIMEDOUT/i,
+        /ECONNRESET/i,
+        /ENOTFOUND/i,
+        /fetch failed/i,
+        /network.*error/i,
+        /registry.*error/i,
+      ],
+    },
     actions: [
       {
         type: 'command',
@@ -528,6 +594,20 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     version: '19',
     requiresConfirmation: true,
     requiresBackup: false,
+    retry: {
+      maxAttempts: 3,
+      delayMs: 2000,
+      backoffMultiplier: 2,
+      maxDelayMs: 10000,
+      retryableErrors: [
+        /ETIMEDOUT/i,
+        /ECONNRESET/i,
+        /ENOTFOUND/i,
+        /fetch failed/i,
+        /network.*error/i,
+        /registry.*error/i,
+      ],
+    },
     actions: [
       {
         type: 'command',
@@ -594,6 +674,20 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     version: '20',
     requiresConfirmation: true,
     requiresBackup: false,
+    retry: {
+      maxAttempts: 3,
+      delayMs: 2000,
+      backoffMultiplier: 2,
+      maxDelayMs: 10000,
+      retryableErrors: [
+        /ETIMEDOUT/i,
+        /ECONNRESET/i,
+        /ENOTFOUND/i,
+        /fetch failed/i,
+        /network.*error/i,
+        /registry.*error/i,
+      ],
+    },
     actions: [
       {
         type: 'command',
@@ -702,11 +796,16 @@ export class WorkflowEngine {
       completedSteps: [],
       failedSteps: [],
       lastValidationResults: new Map(),
+      retryAttempts: new Map(),
     };
   }
 
   getState(): WorkflowState {
     return { ...this.state };
+  }
+
+  getContext(): WorkflowContext {
+    return this.context;
   }
 
   getCurrentStep(): WorkflowStep | null {
@@ -806,7 +905,35 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
   }
 
   markStepFailed(stepId: string): void {
-    this.state.failedSteps.push(stepId);
+    if (!this.state.failedSteps.includes(stepId)) {
+      this.state.failedSteps.push(stepId);
+    }
+  }
+
+  /**
+   * Check if a step can be rolled back
+   */
+  canRollback(stepId?: string): boolean {
+    const targetStepId = stepId || this.getCurrentStep()?.id;
+    if (!targetStepId) {
+      return false;
+    }
+
+    const step = this.workflow.find((s) => s.id === targetStepId);
+    return !!(step && step.rollbackActions && step.rollbackActions.length > 0);
+  }
+
+  /**
+   * Get rollback actions for a step
+   */
+  getRollbackActions(stepId?: string): WorkflowAction[] | null {
+    const targetStepId = stepId || this.getCurrentStep()?.id;
+    if (!targetStepId) {
+      return null;
+    }
+
+    const step = this.workflow.find((s) => s.id === targetStepId);
+    return step?.rollbackActions || null;
   }
 
   setBackupPath(path: string): void {
@@ -815,6 +942,31 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
 
   recordValidationResult(validationName: string, result: ValidationResult): void {
     this.state.lastValidationResults.set(validationName, result);
+  }
+
+  /**
+   * Increment retry attempt counter for a step
+   * Returns the new retry count
+   */
+  incrementRetryAttempt(stepId: string): number {
+    const currentCount = this.state.retryAttempts.get(stepId) || 0;
+    const newCount = currentCount + 1;
+    this.state.retryAttempts.set(stepId, newCount);
+    return newCount;
+  }
+
+  /**
+   * Get retry attempt count for a step
+   */
+  getRetryAttempt(stepId: string): number {
+    return this.state.retryAttempts.get(stepId) || 0;
+  }
+
+  /**
+   * Reset retry attempt counter for a step
+   */
+  resetRetryAttempt(stepId: string): void {
+    this.state.retryAttempts.delete(stepId);
   }
 
   isComplete(): boolean {

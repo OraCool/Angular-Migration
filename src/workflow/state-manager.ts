@@ -30,7 +30,7 @@ export interface CheckpointData {
       stepId: string;
       message: string;
     };
-    // Map serialized as Record for JSON compatibility
+    // Maps serialized as Records for JSON compatibility
     lastValidationResults: Record<
       string,
       {
@@ -40,6 +40,7 @@ export interface CheckpointData {
         timestamp: string; // Date serialized as ISO string
       }
     >;
+    retryAttempts: Record<string, number>; // Retry count per step ID
   };
   context: {
     sessionId: SessionId;
@@ -88,7 +89,7 @@ export class StateManager {
       // Ensure checkpoint directory exists
       await fs.mkdir(this.checkpointDir, { recursive: true });
 
-      // Serialize Map to Record for JSON compatibility
+      // Serialize Maps to Records for JSON compatibility
       const serializedValidations: CheckpointData['state']['lastValidationResults'] = {};
       state.lastValidationResults.forEach((result, key) => {
         serializedValidations[key] = {
@@ -97,6 +98,11 @@ export class StateManager {
           error: result.error,
           timestamp: result.timestamp.toISOString(),
         };
+      });
+
+      const serializedRetryAttempts: Record<string, number> = {};
+      state.retryAttempts.forEach((count, stepId) => {
+        serializedRetryAttempts[stepId] = count;
       });
 
       // Build checkpoint data
@@ -113,6 +119,7 @@ export class StateManager {
             ? { ...state.pendingConfirmation }
             : undefined,
           lastValidationResults: serializedValidations,
+          retryAttempts: serializedRetryAttempts,
         },
         context: {
           sessionId: context.sessionId,
@@ -161,16 +168,8 @@ export class StateManager {
       const content = await fs.readFile(checkpointPath, 'utf-8');
       const checkpoint: CheckpointData = JSON.parse(content);
 
-      // Validate schema version
-      if (checkpoint.version !== this.SCHEMA_VERSION) {
-        process.stderr.write(
-          `[StateManager] ⚠️ Checkpoint schema mismatch: expected v${this.SCHEMA_VERSION}, got v${checkpoint.version}\n`
-        );
-        // Could implement migration logic here in future
-        throw new Error(
-          `Checkpoint schema version mismatch: expected ${this.SCHEMA_VERSION}, got ${checkpoint.version}`
-        );
-      }
+      // Validate checkpoint data integrity
+      this.validateCheckpoint(checkpoint);
 
       process.stderr.write(
         `[StateManager] ✅ Checkpoint loaded: ${sessionId} (step ${checkpoint.state.currentStepIndex})\n`
@@ -273,6 +272,81 @@ export class StateManager {
   }
 
   /**
+   * Validate checkpoint data integrity
+   * Throws error if checkpoint is invalid or corrupted
+   */
+  private validateCheckpoint(checkpoint: CheckpointData): void {
+    // Validate schema version
+    if (checkpoint.version !== this.SCHEMA_VERSION) {
+      throw new Error(
+        `Checkpoint schema version mismatch: expected ${this.SCHEMA_VERSION}, got ${checkpoint.version}`
+      );
+    }
+
+    // Validate required fields
+    if (!checkpoint.sessionId || typeof checkpoint.sessionId !== 'string') {
+      throw new Error('Invalid checkpoint: missing or invalid sessionId');
+    }
+
+    if (!checkpoint.timestamp || typeof checkpoint.timestamp !== 'string') {
+      throw new Error('Invalid checkpoint: missing or invalid timestamp');
+    }
+
+    // Validate timestamp is a valid ISO string
+    const timestamp = new Date(checkpoint.timestamp);
+    if (isNaN(timestamp.getTime())) {
+      throw new Error('Invalid checkpoint: timestamp is not a valid date');
+    }
+
+    // Validate state structure
+    if (!checkpoint.state || typeof checkpoint.state !== 'object') {
+      throw new Error('Invalid checkpoint: missing or invalid state');
+    }
+
+    if (typeof checkpoint.state.currentStepIndex !== 'number' || checkpoint.state.currentStepIndex < 0) {
+      throw new Error('Invalid checkpoint: invalid currentStepIndex');
+    }
+
+    if (!Array.isArray(checkpoint.state.completedSteps)) {
+      throw new Error('Invalid checkpoint: completedSteps must be an array');
+    }
+
+    if (!Array.isArray(checkpoint.state.failedSteps)) {
+      throw new Error('Invalid checkpoint: failedSteps must be an array');
+    }
+
+    if (!checkpoint.state.lastValidationResults || typeof checkpoint.state.lastValidationResults !== 'object') {
+      throw new Error('Invalid checkpoint: invalid lastValidationResults');
+    }
+
+    // Validate context structure
+    if (!checkpoint.context || typeof checkpoint.context !== 'object') {
+      throw new Error('Invalid checkpoint: missing or invalid context');
+    }
+
+    if (!checkpoint.context.sessionId || typeof checkpoint.context.sessionId !== 'string') {
+      throw new Error('Invalid checkpoint: invalid context.sessionId');
+    }
+
+    if (!checkpoint.context.projectPath || typeof checkpoint.context.projectPath !== 'string') {
+      throw new Error('Invalid checkpoint: invalid context.projectPath');
+    }
+
+    if (!checkpoint.context.currentVersion || typeof checkpoint.context.currentVersion !== 'string') {
+      throw new Error('Invalid checkpoint: invalid context.currentVersion');
+    }
+
+    if (!checkpoint.context.targetVersion || typeof checkpoint.context.targetVersion !== 'string') {
+      throw new Error('Invalid checkpoint: invalid context.targetVersion');
+    }
+
+    // Session IDs should match
+    if (checkpoint.sessionId !== checkpoint.context.sessionId) {
+      throw new Error('Invalid checkpoint: sessionId mismatch between root and context');
+    }
+  }
+
+  /**
    * Get full path to checkpoint file
    */
   private getCheckpointPath(sessionId: SessionId): string {
@@ -287,7 +361,7 @@ export class StateManager {
     state: WorkflowState;
     context: WorkflowContext;
   } {
-    // Reconstruct Map from Record
+    // Reconstruct Maps from Records
     const validationResults = new Map<string, ValidationResult>();
     Object.entries(checkpointData.state.lastValidationResults).forEach(
       ([key, val]) => {
@@ -300,6 +374,13 @@ export class StateManager {
       }
     );
 
+    const retryAttempts = new Map<string, number>();
+    Object.entries(checkpointData.state.retryAttempts).forEach(
+      ([stepId, count]) => {
+        retryAttempts.set(stepId, count);
+      }
+    );
+
     const state: WorkflowState = {
       currentStepIndex: checkpointData.state.currentStepIndex,
       completedSteps: [...checkpointData.state.completedSteps],
@@ -307,6 +388,7 @@ export class StateManager {
       backupPath: checkpointData.state.backupPath,
       pendingConfirmation: checkpointData.state.pendingConfirmation,
       lastValidationResults: validationResults,
+      retryAttempts,
     };
 
     const context: WorkflowContext = {

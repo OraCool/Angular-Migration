@@ -275,7 +275,7 @@ Ready to begin!
    */
   private async executeCurrentStep(sessionId: SessionId): Promise<void> {
     process.stderr.write(`[Workflow] executeCurrentStep called for session ${sessionId}\n`);
-    
+
     const workflow = this.workflows.get(sessionId);
     if (!workflow) {
       process.stderr.write(`[Workflow] ERROR: No workflow found in executeCurrentStep\n`);
@@ -290,6 +290,9 @@ Ready to begin!
       await this.completeWorkflow(sessionId);
       return;
     }
+
+    // Show progress indicator
+    await this.sendProgressUpdate(sessionId, engine);
 
     process.stderr.write(`[Workflow] Executing step: ${currentStep.id} (${currentStep.title})\n`);
     await this.sendThought(sessionId, `Starting: ${currentStep.title}`);
@@ -337,7 +340,10 @@ Ready to begin!
           }
         );
 
-        const result = await executor.executeAction(action);
+        // Use retry wrapper if step has retry configuration
+        const result = currentStep.retry
+          ? await executor.executeActionWithRetry(action, currentStep.id, currentStep.retry)
+          : await executor.executeAction(action);
 
         await this.updateToolCall(sessionId, toolCall.toolCallId, {
           status: result.success ? 'completed' : 'failed',
@@ -415,8 +421,11 @@ Ready to begin!
           { type: validation.type }
         );
 
-        let result = await executor.executeValidation(validation);
-        
+        // Use retry wrapper if step has retry configuration
+        let result = currentStep.retry
+          ? await executor.executeValidationWithRetry(validation, currentStep.id, currentStep.retry)
+          : await executor.executeValidation(validation);
+
         // Send validation result to client
         if (result.success) {
           await this.sendThought(sessionId, `✅ ${validation.name}: PASSED`);
@@ -464,7 +473,9 @@ Ready to begin!
             
             // Re-run validation after fix
             process.stderr.write(`[Auto-Fix] Re-running validation: ${validation.name}\n`);
-            result = await executor.executeValidation(validation);
+            result = currentStep.retry
+              ? await executor.executeValidationWithRetry(validation, currentStep.id, currentStep.retry)
+              : await executor.executeValidation(validation);
             
             if (result.success) {
               process.stderr.write(`[Auto-Fix] ✅ Validation passed after fix!\n`);
@@ -804,6 +815,28 @@ A detailed migration report has been generated in your project directory.
     });
     // Ensure notification is written
     await this.transport.flush();
+  }
+
+  /**
+   * Send progress update to the client
+   */
+  private async sendProgressUpdate(sessionId: SessionId, engine: WorkflowEngine): Promise<void> {
+    const progress = engine.getProgress();
+    const currentStep = engine.getCurrentStep();
+
+    if (!currentStep) {
+      return;
+    }
+
+    // Create progress bar (20 chars wide)
+    const barWidth = 20;
+    const filledWidth = Math.round((progress.percentage / 100) * barWidth);
+    const emptyWidth = barWidth - filledWidth;
+    const bar = '█'.repeat(filledWidth) + '░'.repeat(emptyWidth);
+
+    const progressMessage = `\n📊 **Migration Progress: ${progress.percentage}%** (${progress.current}/${progress.total})\n${bar}\n\n▶️  **Current Step:** ${currentStep.title}${currentStep.version ? ` (Angular v${currentStep.version})` : ''}`;
+
+    await this.sendThought(sessionId, progressMessage);
   }
 
   private async sendPlan(sessionId: SessionId, engine: WorkflowEngine): Promise<void> {

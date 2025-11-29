@@ -11,7 +11,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "vitest"
+    "test": "vitest",
+    "test:state": "npm run build && node dist/test-state-persistence.js"
   },
   "keywords": [
     "acp",
