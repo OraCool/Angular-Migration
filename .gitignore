@@ -49,3 +49,4 @@ backup-info.json
 *.tmp
 *.temp
 .cache/
+logs

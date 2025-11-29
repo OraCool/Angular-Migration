@@ -13,12 +13,14 @@ import {
 } from './engine.js';
 import { WorkflowExecutor } from './executor.js';
 import { generateEnhancedErrorMessage, getRecommendedScripts } from './issue-mapper.js';
+import { validateNodeVersion, switchNodeVersion, installNodeVersion } from '../utils/node-version-checker.js';
 
 export class WorkflowMigrationHandler {
   private workflows = new Map<SessionId, { 
     engine: WorkflowEngine; 
     executor: WorkflowExecutor;
     session: SessionState;
+    projectPath: string; // Store project path for easy access
   }>();
 
   constructor(private transport: JsonRpcTransport) {}
@@ -30,12 +32,13 @@ export class WorkflowMigrationHandler {
     sessionId: SessionId,
     session: SessionState,
     options: {
-      currentVersion: string;
+      currentVersion?: string; // Optional - will auto-detect if not provided
       targetVersion: string;
       skipTests?: boolean;
       skipLint?: boolean;
       autoConfirm?: boolean;
       customFolder?: string | null;
+      resumeFromStep?: string | number; // Step ID or index to resume from
     }
   ): Promise<void> {
     // Determine project path - use custom folder if provided, otherwise use session cwd
@@ -46,11 +49,21 @@ export class WorkflowMigrationHandler {
         ? options.customFolder
         : path.join(session.cwd, options.customFolder);
     }
+
+    // Auto-detect current Angular version if not provided
+    let currentVersion = options.currentVersion;
+    if (!currentVersion) {
+      currentVersion = await this.detectAngularVersion(projectPath);
+      await this.sendMessage(
+        sessionId,
+        `🔍 Detected Angular version: **${currentVersion}**`
+      );
+    }
     
     const context: WorkflowContext = {
       sessionId,
       projectPath,
-      currentVersion: options.currentVersion,
+      currentVersion, // Use the auto-detected or provided version
       targetVersion: options.targetVersion,
       skipTests: options.skipTests,
       skipLint: options.skipLint,
@@ -58,14 +71,51 @@ export class WorkflowMigrationHandler {
     };
 
     const engine = new WorkflowEngine(ANGULAR_MIGRATION_WORKFLOW, context);
-    const executor = new WorkflowExecutor(engine, context);
+    const executor = new WorkflowExecutor(engine, context, {
+      sendThought: (msg) => this.sendThought(sessionId, msg),
+      sendMessage: (msg) => this.sendMessage(sessionId, msg),
+    });
 
-    this.workflows.set(sessionId, { engine, executor, session });
+    this.workflows.set(sessionId, { engine, executor, session, projectPath });
+
+    // Resume from specific step if requested
+    if (options.resumeFromStep !== undefined) {
+      const success = engine.skipToStep(options.resumeFromStep);
+      if (success) {
+        await this.sendMessage(
+          sessionId,
+          `📍 Resuming migration from step: **${engine.getCurrentStep()?.title}**`
+        );
+      } else {
+        await this.sendMessage(
+          sessionId,
+          `⚠️ Could not find step: ${options.resumeFromStep}. Starting from beginning.`
+        );
+      }
+    } else if (!options.currentVersion) {
+      // Auto-skip to appropriate step based on detected version
+      const startingStepId = this.findStartingStep(currentVersion);
+      if (startingStepId) {
+        const success = engine.skipToStep(startingStepId);
+        if (success) {
+          await this.sendMessage(
+            sessionId,
+            `⏩ Starting from Angular ${currentVersion} → skipping to: **${engine.getCurrentStep()?.title}**`
+          );
+        }
+      }
+    }
 
     process.stderr.write(`[Workflow] Started workflow for session ${sessionId}, path: ${context.projectPath}\n`);
 
     // Send initial plan
     await this.sendPlan(sessionId, engine);
+
+    // Check Node.js version compatibility before starting
+    const currentStep = engine.getCurrentStep();
+    if (currentStep?.version) {
+      await this.checkNodeVersion(sessionId, currentStep.version, context.projectPath);
+    }
 
     // Send introduction message
     await this.sendMessage(
@@ -174,6 +224,14 @@ Ready to begin!
     process.stderr.write(`[Workflow] Executing step: ${currentStep.id} (${currentStep.title})\n`);
     await this.sendThought(sessionId, `Starting: ${currentStep.title}`);
 
+    // Check Node.js version compatibility before upgrade steps
+    if (currentStep.version) {
+      const workflow = this.workflows.get(sessionId);
+      if (workflow) {
+        await this.checkNodeVersion(sessionId, currentStep.version, workflow.projectPath);
+      }
+    }
+
     try {
       // Handle backup - either explicit backup step or steps that require backup
       if (currentStep.id === 'pre-migration-backup' || (currentStep.requiresBackup && currentStep.id !== 'pre-migration-backup')) {
@@ -230,6 +288,45 @@ Ready to begin!
         });
 
         if (!result.success) {
+          // Try auto-fix for action errors (use LLM if patterns don't match)
+          const errorText = result.error || '';
+          
+          process.stderr.write(`[Auto-Fix] Action failed: ${action.name}\n`);
+          await this.sendMessage(sessionId, `🔧 **Action failed: ${action.name}**. Attempting auto-fix...`);
+          
+          // Create auto-fix action (will try patterns first, then LLM)
+          const autoFixAction = {
+            type: 'auto-fix' as const,
+            name: `auto-fix-${action.name}`,
+            errorPattern: errorText,
+            description: `Automatic fix for ${action.name} errors`,
+            continueOnError: false,
+          };
+          
+          const autoFixResult = await executor.executeAction(autoFixAction);
+          
+          if (autoFixResult.success) {
+            process.stderr.write(`[Auto-Fix] ✅ Fix applied for ${action.name}. Retrying action...\n`);
+            await this.sendMessage(sessionId, `✅ **Fix applied**. Retrying ${action.name}...`);
+            
+            // Retry the original action
+            const retryResult = await executor.executeAction(action);
+            
+            if (retryResult.success) {
+              process.stderr.write(`[Auto-Fix] ✅ Action succeeded after auto-fix!\n`);
+              await this.sendMessage(sessionId, `✅ **${action.name} succeeded** after auto-fix!`);
+              // Continue to next action
+              continue;
+            } else {
+              process.stderr.write(`[Auto-Fix] ❌ Action still failing after auto-fix\n`);
+              await this.sendMessage(sessionId, `⚠️ **Action still failing** after auto-fix:\n\`\`\`\n${retryResult.error?.substring(0, 500)}\n\`\`\``);
+              throw new Error(`Action failed: ${action.name}\n${retryResult.error}`);
+            }
+          } else {
+            process.stderr.write(`[Auto-Fix] ❌ Auto-fix failed: ${autoFixResult.error}\n`);
+            await this.sendMessage(sessionId, `⚠️ **Auto-fix failed:** ${autoFixResult.error}`);
+          }
+          
           throw new Error(`Action failed: ${action.name}\n${result.error}`);
         }
       }
@@ -238,7 +335,8 @@ Ready to begin!
       let allValidationsPassed = true;
 
       for (const validation of currentStep.validations) {
-        await this.sendThought(sessionId, validation.description);
+        await this.sendThought(sessionId, `🔍 ${validation.description}`);
+        await this.sendThought(sessionId, `Running: ${validation.command || validation.scriptPath}`);
 
         const toolCall = await this.createToolCall(
           sessionId,
@@ -247,7 +345,75 @@ Ready to begin!
           { type: validation.type }
         );
 
-        const result = await executor.executeValidation(validation);
+        let result = await executor.executeValidation(validation);
+        
+        // Send validation result to client
+        if (result.success) {
+          await this.sendThought(sessionId, `✅ ${validation.name}: PASSED`);
+        } else {
+          await this.sendThought(sessionId, `❌ ${validation.name}: FAILED`);
+          
+          // Send error output to client (first 1000 chars)
+          if (result.error) {
+            const errorPreview = result.error.substring(0, 1000);
+            await this.sendMessage(sessionId, `**Error Output:**\n\`\`\`\n${errorPreview}${result.error.length > 1000 ? '\n... (truncated)' : ''}\n\`\`\``);
+          }
+        }
+        
+        // Send output preview to client if available
+        if (result.output && result.output.length > 100) {
+          const outputPreview = result.output.substring(0, 500);
+          await this.sendThought(sessionId, `Output: ${outputPreview}${result.output.length > 500 ? '... (see full log)' : ''}`);
+        }
+
+        // Auto-fix on error if enabled
+        if (!result.success && validation.autoFixOnError) {
+          process.stderr.write(`[Auto-Fix] Triggered for validation: ${validation.name}\n`);
+          process.stderr.write(`[Auto-Fix] ===== FULL ERROR FOR AUTO-FIX =====\n`);
+          process.stderr.write(result.error || 'No error message');
+          process.stderr.write(`\n[Auto-Fix] ===== END ERROR =====\n`);
+          
+          await this.sendThought(sessionId, `Validation failed. Attempting automatic fix...`);
+          await this.sendMessage(sessionId, `🔧 **Auto-fix triggered for ${validation.name}**`);
+          
+          // Create auto-fix action from validation error
+          const autoFixAction = {
+            type: 'auto-fix' as const,
+            name: `auto-fix-${validation.name}`,
+            errorPattern: result.error || '',
+            description: `Automatic fix for ${validation.name} errors`,
+            continueOnError: false,
+          };
+
+          const autoFixResult = await executor.executeAction(autoFixAction);
+          
+          if (autoFixResult.success) {
+            process.stderr.write(`[Auto-Fix] ✅ Fix applied successfully for ${validation.name}\n`);
+            await this.sendMessage(sessionId, `✅ **Auto-fix applied successfully**. Re-running validation...`);
+            await this.sendThought(sessionId, `Fix details: ${autoFixResult.output || 'Pattern-based fix applied'}`);
+            
+            // Re-run validation after fix
+            process.stderr.write(`[Auto-Fix] Re-running validation: ${validation.name}\n`);
+            result = await executor.executeValidation(validation);
+            
+            if (result.success) {
+              process.stderr.write(`[Auto-Fix] ✅ Validation passed after fix!\n`);
+              await this.sendMessage(sessionId, `✅ **Validation now passing** after auto-fix!`);
+            } else {
+              process.stderr.write(`[Auto-Fix] ❌ Validation still failing after fix\n`);
+              await this.sendMessage(sessionId, `⚠️ **Validation still failing** after auto-fix. Manual intervention may be needed.`);
+              
+              // Send the new error
+              if (result.error) {
+                const errorPreview = result.error.substring(0, 1000);
+                await this.sendMessage(sessionId, `**Remaining Error:**\n\`\`\`\n${errorPreview}${result.error.length > 1000 ? '\n... (truncated)' : ''}\n\`\`\``);
+              }
+            }
+          } else {
+            process.stderr.write(`[Auto-Fix] ❌ Fix failed: ${autoFixResult.error}\n`);
+            await this.sendMessage(sessionId, `⚠️ **Auto-fix failed:** ${autoFixResult.error}`);
+          }
+        }
 
         await this.updateToolCall(sessionId, toolCall.toolCallId, {
           status: result.success ? 'completed' : 'failed',
@@ -508,6 +674,167 @@ A detailed migration report has been generated in your project directory.
     });
     // Ensure notification is written
     await this.transport.flush();
+  }
+
+  /**
+   * Detect current Angular version from package.json
+   */
+  private async detectAngularVersion(projectPath: string): Promise<string> {
+    try {
+      const { promises: fs } = await import('fs');
+      const path = await import('path');
+      const packageJsonPath = path.join(projectPath, 'package.json');
+      const content = await fs.readFile(packageJsonPath, 'utf-8');
+      const packageJson = JSON.parse(content);
+
+      // Check both dependencies and devDependencies
+      const deps = packageJson.dependencies || {};
+      const devDeps = packageJson.devDependencies || {};
+      const coreVersion = deps['@angular/core'] || devDeps['@angular/core'];
+
+      if (coreVersion) {
+        // Extract major version number (e.g., "^14.0.0" -> "14")
+        const match = coreVersion.match(/(\d+)\./);
+        if (match) {
+          return match[1];
+        }
+      }
+    } catch (error) {
+      // If detection fails, default to 14
+      console.error('[Handler] Failed to detect Angular version:', error);
+    }
+    return '14'; // Default to v14 if detection fails
+  }
+
+  /**
+   * Find the appropriate starting step based on current Angular version
+   */
+  private findStartingStep(currentVersion: string): string | null {
+    const version = parseInt(currentVersion, 10);
+    
+    // Map current version to appropriate starting step
+    switch (version) {
+      case 14:
+        return null; // Start from beginning
+      case 15:
+        return 'migrate-standalone'; // Skip v15 upgrade, do standalone migration
+      case 16:
+        return 'upgrade-v17'; // Skip to v17 upgrade
+      case 17:
+        return 'migrate-control-flow'; // Do control flow migration
+      case 18:
+        return 'upgrade-v19'; // Skip to v19 upgrade
+      case 19:
+        return 'upgrade-v20'; // Final upgrade
+      default:
+        return null; // Unknown version, start from beginning
+    }
+  }
+
+  /**
+   * Check Node.js version compatibility and offer to switch if needed
+   */
+  private async checkNodeVersion(
+    sessionId: SessionId,
+    angularVersion: string,
+    projectPath: string
+  ): Promise<void> {
+    // Official Angular Node.js requirements
+    // Source: https://angular.dev/reference/versions
+    const nodeRequirements: Record<string, string> = {
+      '14': '14.20.0-14.999.999,16.14.0-16.999.999,18.10.0-18.999.999',
+      '15': '14.20.0-14.999.999,16.14.0-16.999.999,18.10.0-18.999.999',
+      '16': '16.14.0-16.999.999,18.10.0-18.999.999',
+      '17': '18.13.0-18.999.999,20.9.0-20.999.999',
+      '18': '18.19.0-18.999.999,20.11.0-20.999.999',
+      '19': '18.19.0-18.999.999,20.11.0-20.999.999,22.0.0-22.999.999',
+      '20': '20.11.0-20.999.999,22.0.0-22.999.999',
+    };
+
+    const requiredVersions = nodeRequirements[angularVersion];
+    if (!requiredVersions) {
+      return; // No requirement defined
+    }
+
+    try {
+      const validation = await validateNodeVersion(requiredVersions);
+      
+      if (validation.isCompatible) {
+        await this.sendMessage(sessionId, validation.message);
+        return;
+      }
+
+      // Not compatible - show warning and offer solutions
+      await this.sendMessage(
+        sessionId,
+        `## ⚠️ Node.js Version Incompatibility\n\n${validation.message}\n\nAngular ${angularVersion} requires Node.js ${requiredVersions}`
+      );
+
+      if (validation.suggestedAction === 'switch' && validation.installedCompatibleVersion) {
+        await this.sendMessage(
+          sessionId,
+          `\n� Automatically switching to Node.js ${validation.installedCompatibleVersion} using NVM...`
+        );
+        
+        const switched = await switchNodeVersion(validation.installedCompatibleVersion);
+        if (switched) {
+          await this.sendMessage(
+            sessionId,
+            `✅ Successfully switched to Node.js ${validation.installedCompatibleVersion}\n\nProceeding with migration...`
+          );
+        } else {
+          await this.sendMessage(
+            sessionId,
+            `❌ Failed to switch Node version automatically.\n\nPlease manually run:\n\`\`\`bash\nnvm use ${validation.installedCompatibleVersion}\n\`\`\`\n\nThen restart the migration.`
+          );
+          throw new Error(`Failed to switch to Node.js ${validation.installedCompatibleVersion}`);
+        }
+      } else if (validation.suggestedAction === 'install' && validation.recommendedVersion) {
+        await this.sendMessage(
+          sessionId,
+          `\n📦 Node.js ${validation.recommendedVersion} is not installed.\n\nInstalling automatically using NVM...`
+        );
+        
+        const installed = await installNodeVersion(validation.recommendedVersion);
+        if (installed) {
+          await this.sendMessage(
+            sessionId,
+            `✅ Successfully installed Node.js ${validation.recommendedVersion}\n\nSwitching to new version...`
+          );
+          
+          const switched = await switchNodeVersion(validation.recommendedVersion);
+          if (switched) {
+            await this.sendMessage(
+              sessionId,
+              `✅ Now using Node.js ${validation.recommendedVersion}\n\nProceeding with migration...`
+            );
+          } else {
+            await this.sendMessage(
+              sessionId,
+              `❌ Installed but failed to switch.\n\nPlease manually run:\n\`\`\`bash\nnvm use ${validation.recommendedVersion}\n\`\`\`\n\nThen restart the migration.`
+            );
+            throw new Error(`Failed to switch to Node.js ${validation.recommendedVersion}`);
+          }
+        } else {
+          await this.sendMessage(
+            sessionId,
+            `❌ Failed to install Node.js ${validation.recommendedVersion}.\n\nPlease manually run:\n\`\`\`bash\nnvm install ${validation.recommendedVersion}\nnvm use ${validation.recommendedVersion}\n\`\`\`\n\nThen restart the migration.`
+          );
+          throw new Error(`Failed to install Node.js ${validation.recommendedVersion}`);
+        }
+      } else {
+        await this.sendMessage(
+          sessionId,
+          `\n⚠️ NVM is not available. Please manually install and switch to a compatible Node.js version:\n\n**Compatible versions:** ${requiredVersions}\n\n**Recommended:** ${validation.recommendedVersion || '18.19.0'}\n\nAfter switching Node versions, restart the migration.`
+        );
+        throw new Error('Incompatible Node.js version and NVM not available');
+      }
+    } catch (error) {
+      await this.sendMessage(
+        sessionId,
+        `⚠️ Failed to check Node.js version: ${error}\n\nPlease ensure you have Node.js ${requiredVersions} installed.`
+      );
+    }
   }
 
   private async createToolCall(

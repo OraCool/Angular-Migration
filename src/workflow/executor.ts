@@ -12,6 +12,8 @@ import type {
   ValidationResult,
   WorkflowContext,
 } from './engine.js';
+import { LLMFixerService } from '../services/llm-fixer.js';
+import { findPatternFix } from '../services/pattern-fixer.js';
 
 /**
  * Resolve workshop root path from environment or default location
@@ -36,11 +38,24 @@ export interface ExecutionResult {
   duration: number;
 }
 
+export interface ExecutorCallbacks {
+  sendThought?: (message: string) => Promise<void>;
+  sendMessage?: (message: string) => Promise<void>;
+}
+
 export class WorkflowExecutor {
+  private llmFixer: LLMFixerService;
+  private callbacks?: ExecutorCallbacks;
+  
   constructor(
     private engine: WorkflowEngine,
-    private context: WorkflowContext
-  ) {}
+    private context: WorkflowContext,
+    callbacks?: ExecutorCallbacks
+  ) {
+    const workshopRoot = getWorkshopRoot();
+    this.callbacks = callbacks;
+    this.llmFixer = new LLMFixerService(workshopRoot, true, callbacks); // Enable LLM with messaging
+  }
 
   /**
    * Execute a workflow action (command, script, or schematic)
@@ -79,6 +94,11 @@ export class WorkflowExecutor {
             duration: 0,
           };
           break;
+        
+        case 'auto-fix':
+          // Auto-fix action: try pattern-based or LLM fix
+          result = await this.runAutoFix(action);
+          break;
 
         default:
           throw new Error(`Unknown action type: ${(action as any).type}`);
@@ -101,6 +121,11 @@ export class WorkflowExecutor {
    */
   async executeValidation(validation: WorkflowValidation): Promise<ValidationResult> {
     const startTime = Date.now();
+    
+    process.stderr.write(`[Validation] Starting: ${validation.name} (type: ${validation.type})\n`);
+    if (validation.command) {
+      process.stderr.write(`[Validation] Command: ${validation.command}\n`);
+    }
 
     try {
       let result: ExecutionResult;
@@ -138,22 +163,50 @@ export class WorkflowExecutor {
         throw new Error('Validation must have either command or scriptPath');
       }
 
+      const duration = Date.now() - startTime;
       const validationResult: ValidationResult = {
         success: validation.failOnError ? result.success : true,
         output: result.output,
         error: result.error,
         timestamp: new Date(),
       };
+      
+      // Log validation result
+      process.stderr.write(`[Validation] Completed: ${validation.name} in ${duration}ms\n`);
+      process.stderr.write(`[Validation] Result: ${validationResult.success ? '✅ PASS' : '❌ FAIL'}\n`);
+      
+      if (result.exitCode !== undefined) {
+        process.stderr.write(`[Validation] Exit code: ${result.exitCode}\n`);
+      }
+      
+      if (validationResult.error) {
+        // Show FULL error, not just preview - critical for debugging
+        process.stderr.write(`[Validation] ===== FULL ERROR OUTPUT =====\n`);
+        process.stderr.write(validationResult.error);
+        process.stderr.write(`\n[Validation] ===== END ERROR OUTPUT =====\n`);
+      }
+      
+      if (validationResult.output && validationResult.output.length > 0) {
+        process.stderr.write(`[Validation] ===== FULL OUTPUT =====\n`);
+        process.stderr.write(validationResult.output);
+        process.stderr.write(`\n[Validation] ===== END OUTPUT =====\n`);
+      }
 
       // Record validation result in engine
       this.engine.recordValidationResult(validation.name, validationResult);
 
       return validationResult;
     } catch (error) {
+      const duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      process.stderr.write(`[Validation] EXCEPTION in ${validation.name} after ${duration}ms\n`);
+      process.stderr.write(`[Validation] Exception: ${errorMessage}\n`);
+      
       const validationResult: ValidationResult = {
         success: false,
         output: '',
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
         timestamp: new Date(),
       };
 
@@ -199,17 +252,26 @@ export class WorkflowExecutor {
       }
 
       child.stdout?.on('data', (data) => {
-        stdout += data.toString();
+        const text = data.toString();
+        stdout += text;
+        // Stream to stderr for real-time visibility
+        process.stderr.write(text);
       });
 
       child.stderr?.on('data', (data) => {
-        stderr += data.toString();
+        const text = data.toString();
+        stderr += text;
+        // Stream to stderr for real-time visibility
+        process.stderr.write(text);
       });
 
       child.on('close', (code) => {
         if (timeoutId) {
           clearTimeout(timeoutId);
         }
+
+        // Log captured output lengths for debugging
+        process.stderr.write(`[Executor] Command finished. Exit code: ${code}, stdout: ${stdout.length} bytes, stderr: ${stderr.length} bytes\n`);
 
         if (killed) {
           resolve({
@@ -220,13 +282,43 @@ export class WorkflowExecutor {
             duration: 0,
           });
         } else {
+          // Check for test/lint errors even if exit code is 0 (Karma, Jest, ESLint sometimes exit 0)
+          const combinedOutput = stdout + stderr;
+          const hasKarmaError = /ERROR \[karma-server\]|Error: Found \d+ load error/i.test(combinedOutput);
+          const hasJestError = /FAIL|Test Suites: \d+ failed/i.test(combinedOutput);
+          const hasLintError = /\d+ error|✖ \d+ problem/i.test(combinedOutput);
+          const hasBuildError = /ERROR in|Error: src\/|Build failed|Compilation failed|error NG\d+/i.test(combinedOutput);
+          
+          const hasErrorInOutput = hasKarmaError || hasJestError || hasLintError || hasBuildError;
+          const failed = code !== 0 || hasErrorInOutput;
+          
+          // ALWAYS log error detection for debugging
+          process.stderr.write(`[Executor] Exit code: ${code}, hasErrorInOutput: ${hasErrorInOutput}, failed: ${failed}\n`);
+          if (hasBuildError) {
+            process.stderr.write(`[Executor] Build error detected in output!\n`);
+            // Log first 500 chars of output that triggered detection
+            const errorMatch = combinedOutput.match(/(ERROR in|Error: src\/|error NG\d+).{0,200}/i);
+            if (errorMatch) {
+              process.stderr.write(`[Executor] Matched: ${errorMatch[0]}\n`);
+            }
+          }
+          
+          // Log error detection for debugging
+          if (hasErrorInOutput && code === 0) {
+            process.stderr.write(`[Executor] Detected error in output despite exit code 0:\n`);
+            if (hasKarmaError) process.stderr.write(`[Executor]   - Karma error detected\n`);
+            if (hasJestError) process.stderr.write(`[Executor]   - Jest error detected\n`);
+            if (hasLintError) process.stderr.write(`[Executor]   - Lint error detected\n`);
+            if (hasBuildError) process.stderr.write(`[Executor]   - Build error detected\n`);
+          }
+          
           // If command failed but stderr is empty, use stdout or generic message
-          const errorMessage = code !== 0 
+          const errorMessage = failed
             ? (stderr || stdout || `Command exited with code ${code}`)
             : undefined;
           
           resolve({
-            success: code === 0,
+            success: !failed,
             output: stdout,
             error: errorMessage,
             exitCode: code || 0,
@@ -358,4 +450,105 @@ export class WorkflowExecutor {
       throw new Error(`Restore failed: ${result.error}`);
     }
   }
+  
+  /**
+   * Auto-fix: Try pattern-based fix first, then LLM if enabled
+   */
+  private async runAutoFix(action: WorkflowAction): Promise<ExecutionResult> {
+    const startTime = Date.now();
+    
+    try {
+      // Get last validation error if available
+      const lastError = this.getLastValidationError();
+      const errorToFix = action.errorPattern 
+        ? (lastError?.includes(action.errorPattern) ? lastError : '')
+        : lastError;
+      
+      if (!errorToFix) {
+        return {
+          success: true,
+          output: 'No matching error to fix',
+          duration: Date.now() - startTime,
+        };
+      }
+      
+      // 1. Try pattern-based fix
+      const patternFix = findPatternFix(errorToFix);
+      if (patternFix) {
+        const commands = await patternFix.fix(this.context.projectPath, errorToFix);
+        
+        let allSuccess = true;
+        let output = `Pattern fix: ${patternFix.description}\n`;
+        
+        for (const cmd of commands) {
+          const result = await this.runCommand(cmd, undefined, this.context.projectPath);
+          output += `\n${cmd}\n${result.output}`;
+          
+          if (!result.success && !action.continueOnError) {
+            allSuccess = false;
+            break;
+          }
+        }
+        
+        return {
+          success: allSuccess || action.continueOnError || false,
+          output,
+          duration: Date.now() - startTime,
+        };
+      }
+      
+      // 2. Fallback to LLM fix
+      if (this.callbacks?.sendThought) {
+        await this.callbacks.sendThought('🤖 No pattern match found. Consulting LLM for fix...');
+      }
+      
+      const fixResult = await this.llmFixer.fixError({
+        error: errorToFix,
+        errorType: 'Build Errors', // TODO: detect from error
+        workshopRoot: getWorkshopRoot(),
+        angularVersion: this.context.currentVersion,
+      });
+      
+      if (fixResult.success && fixResult.commands) {
+        let output = fixResult.usedLLM 
+          ? `LLM fix: ${fixResult.explanation}\n` 
+          : `Fix: ${fixResult.explanation}\n`;
+        
+        for (const cmd of fixResult.commands) {
+          const result = await this.runCommand(cmd, undefined, this.context.projectPath);
+          output += `\n${cmd}\n${result.output}`;
+        }
+        
+        return {
+          success: true,
+          output,
+          duration: Date.now() - startTime,
+        };
+      }
+      
+      return {
+        success: action.continueOnError || false,
+        output: fixResult.explanation || 'No fix available',
+        duration: Date.now() - startTime,
+      };
+    } catch (error) {
+      return {
+        success: action.continueOnError || false,
+        output: '',
+        error: error instanceof Error ? error.message : String(error),
+        duration: Date.now() - startTime,
+      };
+    }
+  }
+  
+  /**
+   * Get last validation error from engine state
+   */
+  private getLastValidationError(): string | undefined {
+    const state = this.engine.getState();
+    const lastResults = Array.from(state.lastValidationResults.values());
+    const lastFailure = lastResults.reverse().find(r => !r.success);
+    return lastFailure?.error || lastFailure?.output;
+  }
 }
+

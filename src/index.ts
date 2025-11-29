@@ -223,13 +223,24 @@ class AngularMigrationAgent {
     const folderMatch = userQuery.match(/(?:in|from|at|folder|path)\s+(?:the\s+)?([\w\-_/\.]+)/i);
     const customFolder = folderMatch ? folderMatch[1] : null;
 
+    // Extract resume step from query (e.g., "resume from upgrade-v16" or "start from step 8")
+    const resumeStepMatch = userQuery.match(/(?:resume|start|continue)\s+(?:from|at)\s+(?:step\s+)?(\S+)/i);
+    let resumeFromStep: string | number | undefined;
+    if (resumeStepMatch) {
+      const stepRef = resumeStepMatch[1];
+      // Check if it's a number (step index) or string (step ID)
+      const stepNum = parseInt(stepRef, 10);
+      resumeFromStep = !isNaN(stepNum) ? stepNum : stepRef;
+    }
+
     await this.workflowHandler.startWorkflow(sessionId, session, {
-      currentVersion: '14',
+      // currentVersion is now optional - will auto-detect if not provided
       targetVersion: '20',
       skipTests,
       skipLint,
       autoConfirm,
       customFolder,
+      resumeFromStep,
     });
 
     // Don't set awaiting confirmation here - the workflow handler manages it
