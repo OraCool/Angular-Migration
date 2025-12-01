@@ -5,8 +5,8 @@
  * Handles Angular 14 → 20 migration via Agent Client Protocol
  */
 
-import { logConfig } from './config.js';
-import { JsonRpcTransport } from './transport/jsonrpc.js';
+import { logConfig } from "./config.js";
+import { JsonRpcTransport } from "./transport/jsonrpc.js";
 import type {
   PROTOCOL_VERSION,
   InitializeRequest,
@@ -22,7 +22,19 @@ import type {
   ToolCallUpdate,
   Plan,
   PlanEntry,
-} from './types/acp.js';
+} from "./types/acp.js";
+import {
+  Agent,
+  AuthenticateRequest,
+  AuthenticateResponse,
+  CancelNotification,
+  LoadSessionRequest,
+  LoadSessionResponse,
+  SetSessionModelRequest,
+  SetSessionModelResponse,
+  SetSessionModeRequest,
+  SetSessionModeResponse,
+} from "@agentclientprotocol/sdk";
 
 // Session state management
 export interface SessionState {
@@ -32,15 +44,15 @@ export interface SessionState {
   currentPlan?: Plan;
   activeToolCalls: Map<string, ToolCall>;
   awaitingConfirmation?: {
-    type: 'workflow-step' | 'rollback' | 'skip-step' | 'resume-choice';
+    type: "workflow-step" | "rollback" | "skip-step" | "resume-choice";
     data?: unknown;
   };
 }
 
 // Import WorkflowMigrationHandler after exports
-import { WorkflowMigrationHandler } from './workflow/handler.js';
+import { WorkflowMigrationHandler } from "./workflow/handler.js";
 
-class AngularMigrationAgent {
+class AngularMigrationAgent implements Agent {
   private transport: JsonRpcTransport;
   private sessions = new Map<SessionId, SessionState>();
   private readonly workflowHandler: WorkflowMigrationHandler;
@@ -51,25 +63,68 @@ class AngularMigrationAgent {
     this.workflowHandler = new WorkflowMigrationHandler(this.transport);
     this.setupHandlers();
   }
+  async initialize(params: InitializeRequest): Promise<InitializeResponse> {
+    return this.handleInitialize(params as unknown as InitializeRequest);
+  }
+
+  async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
+    return this.handleNewSession(params as unknown as NewSessionRequest);
+  }
+  loadSession?(params: LoadSessionRequest): Promise<LoadSessionResponse> {
+    throw new Error("Method not implemented.");
+  }
+  setSessionMode?(
+    params: SetSessionModeRequest
+  ): Promise<SetSessionModeResponse | void> {
+    throw new Error("Method not implemented.");
+  }
+  setSessionModel?(
+    params: SetSessionModelRequest
+  ): Promise<SetSessionModelResponse | void> {
+    throw new Error("Method not implemented.");
+  }
+  authenticate(
+    params: AuthenticateRequest
+  ): Promise<AuthenticateResponse | void> {
+    throw new Error("Method not implemented.");
+  }
+  prompt(params: PromptRequest): Promise<PromptResponse> {
+    throw new Error("Method not implemented.");
+  }
+  cancel(params: CancelNotification): Promise<void> {
+    throw new Error("Method not implemented.");
+  }
+  extMethod?(
+    method: string,
+    params: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    throw new Error("Method not implemented.");
+  }
+  extNotification?(
+    method: string,
+    params: Record<string, unknown>
+  ): Promise<void> {
+    throw new Error("Method not implemented.");
+  }
 
   private setupHandlers(): void {
     // Handle initialization
-    this.transport.onRequest('initialize', async (_method, params) => {
+    this.transport.onRequest("initialize", async (_method, params) => {
       return this.handleInitialize(params as unknown as InitializeRequest);
     });
 
     // Handle session creation
-    this.transport.onRequest('session/new', async (_method, params) => {
+    this.transport.onRequest("session/new", async (_method, params) => {
       return this.handleNewSession(params as unknown as NewSessionRequest);
     });
 
     // Handle user prompts
-    this.transport.onRequest('session/prompt', async (_method, params) => {
+    this.transport.onRequest("session/prompt", async (_method, params) => {
       return this.handlePrompt(params as unknown as PromptRequest);
     });
 
     // Handle session cancellation
-    this.transport.onNotification('session/cancel', async (_method, params) => {
+    this.transport.onNotification("session/cancel", async (_method, params) => {
       await this.handleCancel(params as { sessionId: SessionId });
     });
   }
@@ -78,9 +133,9 @@ class AngularMigrationAgent {
     return {
       protocolVersion: 1,
       agentInfo: {
-        name: 'angular-migration-agent',
-        version: '1.0.0',
-        title: 'Angular 14→20 Migration Agent',
+        name: "angular-migration-agent",
+        version: "1.0.0",
+        title: "Angular 14→20 Migration Agent",
       },
       agentCapabilities: {
         promptCapabilities: {
@@ -101,7 +156,7 @@ class AngularMigrationAgent {
 
   private handleNewSession(request: NewSessionRequest): NewSessionResponse {
     const sessionId = `session-${++this.sessionCounter}`;
-    
+
     this.sessions.set(sessionId, {
       id: sessionId,
       cwd: request.cwd,
@@ -115,8 +170,10 @@ class AngularMigrationAgent {
   }
 
   private async handlePrompt(request: PromptRequest): Promise<PromptResponse> {
-    process.stderr.write(`[Agent] handlePrompt called for session ${request.sessionId}\n`);
-    
+    process.stderr.write(
+      `[Agent] handlePrompt called for session ${request.sessionId}\n`
+    );
+
     const session = this.sessions.get(request.sessionId);
     if (!session) {
       throw new Error(`Session not found: ${request.sessionId}`);
@@ -131,21 +188,30 @@ class AngularMigrationAgent {
 
     // Check if awaiting confirmation
     if (session.awaitingConfirmation) {
-      process.stderr.write(`[Agent] Session is awaiting confirmation, handling...\n`);
+      process.stderr.write(
+        `[Agent] Session is awaiting confirmation, handling...\n`
+      );
       await this.handleUserConfirmation(request.sessionId, session, userQuery);
-      return { stopReason: 'end_turn' };
+      return { stopReason: "end_turn" };
     }
 
     // Send thinking message
     process.stderr.write(`[Agent] Sending initial thought...\n`);
-    await this.sendThought(request.sessionId, 'Analyzing your Angular migration request...');
+    await this.sendThought(
+      request.sessionId,
+      "Analyzing your Angular migration request..."
+    );
     process.stderr.write(`[Agent] Thought sent\n`);
 
     // Determine the migration task
     try {
       if (this.isStepByStepMigrationRequest(userQuery)) {
         process.stderr.write(`[Agent] Starting step-by-step migration...\n`);
-        await this.startStepByStepMigration(request.sessionId, session, userQuery);
+        await this.startStepByStepMigration(
+          request.sessionId,
+          session,
+          userQuery
+        );
         process.stderr.write(`[Agent] Step-by-step migration started\n`);
       } else if (this.isMigrationAnalysisRequest(userQuery)) {
         await this.analyzeMigrationNeeds(request.sessionId, session);
@@ -162,17 +228,24 @@ class AngularMigrationAgent {
       }
 
       // Add significant delay to ensure all notifications are sent AND processed before closing response
-      process.stderr.write(`[Agent] Waiting for notifications to be processed before returning response...\n`);
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Increased to 1 second
-      
-      process.stderr.write(`[Agent] Returning response, awaiting=${!!session.awaitingConfirmation}\n`);
+      process.stderr.write(
+        `[Agent] Waiting for notifications to be processed before returning response...\n`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // Increased to 1 second
+
+      process.stderr.write(
+        `[Agent] Returning response, awaiting=${!!session.awaitingConfirmation}\n`
+      );
       return {
-        stopReason: 'end_turn',
+        stopReason: "end_turn",
       };
     } catch (error) {
       process.stderr.write(`[Agent] ERROR in handlePrompt: ${error}\n`);
-      await this.sendMessage(request.sessionId, `❌ Error: ${error instanceof Error ? error.message : String(error)}`);
-      return { stopReason: 'end_turn' };
+      await this.sendMessage(
+        request.sessionId,
+        `❌ Error: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return { stopReason: "end_turn" };
     }
   }
 
@@ -186,27 +259,32 @@ class AngularMigrationAgent {
     const confirmationType = session.awaitingConfirmation.type;
 
     // Special handling for resume-choice: accepts "resume" or "fresh"
-    if (confirmationType === 'resume-choice') {
+    if (confirmationType === "resume-choice") {
       const choice = userQuery.toLowerCase().trim();
-      const data = session.awaitingConfirmation.data as { checkpoint?: any; options?: any } | undefined;
+      const data = session.awaitingConfirmation.data as
+        | { checkpoint?: any; options?: any }
+        | undefined;
       const options = data?.options || {};
 
-      if (choice === 'resume') {
+      if (choice === "resume") {
         // Resume from checkpoint - pass special flag to skip prompt
         session.awaitingConfirmation = undefined;
 
-        await this.sendThought(sessionId, 'Resuming from previous checkpoint...');
+        await this.sendThought(
+          sessionId,
+          "Resuming from previous checkpoint..."
+        );
         await this.workflowHandler.startWorkflow(sessionId, session, {
           ...options, // Preserve original options
-          resumeFromStep: 'resume', // This will skip the checkpoint prompt
+          resumeFromStep: "resume", // This will skip the checkpoint prompt
         });
-      } else if (choice === 'fresh') {
+      } else if (choice === "fresh") {
         // Delete checkpoint and start fresh
         session.awaitingConfirmation = undefined;
 
-        await this.sendThought(sessionId, 'Deleting previous checkpoint...');
+        await this.sendThought(sessionId, "Deleting previous checkpoint...");
         await this.workflowHandler.deleteCheckpoint(sessionId);
-        await this.sendThought(sessionId, 'Starting fresh migration...');
+        await this.sendThought(sessionId, "Starting fresh migration...");
 
         // Restart the workflow fresh with original options
         await this.workflowHandler.startWorkflow(sessionId, session, {
@@ -222,7 +300,9 @@ class AngularMigrationAgent {
     }
 
     // Standard yes/no confirmation
-    const confirmed = /\b(yes|y|confirm|proceed|continue|ok|sure)\b/i.test(userQuery);
+    const confirmed = /\b(yes|y|confirm|proceed|continue|ok|sure)\b/i.test(
+      userQuery
+    );
     const denied = /\b(no|n|cancel|stop|abort|skip)\b/i.test(userQuery);
 
     if (!confirmed && !denied) {
@@ -233,15 +313,16 @@ class AngularMigrationAgent {
       return;
     }
 
+    const confirmationType = session.awaitingConfirmation.type;
     session.awaitingConfirmation = undefined;
 
-    if (confirmationType === 'workflow-step') {
+    if (confirmationType === "workflow-step") {
       await this.workflowHandler.handleConfirmation(sessionId, confirmed);
-    } else if (confirmationType === 'rollback') {
+    } else if (confirmationType === "rollback") {
       if (confirmed) {
         await this.workflowHandler.rollback(sessionId);
       } else {
-        await this.sendMessage(sessionId, 'Rollback cancelled.');
+        await this.sendMessage(sessionId, "Rollback cancelled.");
       }
     }
   }
@@ -251,19 +332,26 @@ class AngularMigrationAgent {
     session: SessionState,
     userQuery: string
   ): Promise<void> {
-    await this.sendThought(sessionId, 'Preparing step-by-step migration workflow...');
+    await this.sendThought(
+      sessionId,
+      "Preparing step-by-step migration workflow..."
+    );
 
     // Parse options from query
     const skipTests = /skip.*test/i.test(userQuery);
     const skipLint = /skip.*lint/i.test(userQuery);
     const autoConfirm = /auto.*confirm|no.*prompt/i.test(userQuery);
-    
+
     // Extract custom folder path from query
-    const folderMatch = userQuery.match(/(?:in|from|at|folder|path)\s+(?:the\s+)?([\w\-_/\.]+)/i);
+    const folderMatch = userQuery.match(
+      /(?:in|from|at|folder|path)\s+(?:the\s+)?([\w\-_/\.]+)/i
+    );
     const customFolder = folderMatch ? folderMatch[1] : null;
 
     // Extract resume step from query (e.g., "resume from upgrade-v16" or "start from step 8")
-    const resumeStepMatch = userQuery.match(/(?:resume|start|continue)\s+(?:from|at)\s+(?:step\s+)?(\S+)/i);
+    const resumeStepMatch = userQuery.match(
+      /(?:resume|start|continue)\s+(?:from|at)\s+(?:step\s+)?(\S+)/i
+    );
     let resumeFromStep: string | number | undefined;
     if (resumeStepMatch) {
       const stepRef = resumeStepMatch[1];
@@ -274,7 +362,7 @@ class AngularMigrationAgent {
 
     await this.workflowHandler.startWorkflow(sessionId, session, {
       // currentVersion is now optional - will auto-detect if not provided
-      targetVersion: '20',
+      targetVersion: "20",
       skipTests,
       skipLint,
       autoConfirm,
@@ -296,34 +384,37 @@ class AngularMigrationAgent {
 
   // ===== Migration Analysis =====
 
-  private async analyzeMigrationNeeds(sessionId: SessionId, session: SessionState): Promise<void> {
+  private async analyzeMigrationNeeds(
+    sessionId: SessionId,
+    session: SessionState
+  ): Promise<void> {
     // Create migration analysis plan
     const plan: Plan = {
       entries: [
         {
-          content: 'Scan codebase for NgModules and components',
-          priority: 'high',
-          status: 'in_progress',
+          content: "Scan codebase for NgModules and components",
+          priority: "high",
+          status: "in_progress",
         },
         {
-          content: 'Identify old template syntax (*ngIf, *ngFor, *ngSwitch)',
-          priority: 'high',
-          status: 'pending',
+          content: "Identify old template syntax (*ngIf, *ngFor, *ngSwitch)",
+          priority: "high",
+          status: "pending",
         },
         {
-          content: 'Find @Input/@Output decorators for signal conversion',
-          priority: 'medium',
-          status: 'pending',
+          content: "Find @Input/@Output decorators for signal conversion",
+          priority: "medium",
+          status: "pending",
         },
         {
-          content: 'Catalog Angular Material usage',
-          priority: 'medium',
-          status: 'pending',
+          content: "Catalog Angular Material usage",
+          priority: "medium",
+          status: "pending",
         },
         {
-          content: 'Generate migration report',
-          priority: 'high',
-          status: 'pending',
+          content: "Generate migration report",
+          priority: "high",
+          status: "pending",
         },
       ],
     };
@@ -333,16 +424,19 @@ class AngularMigrationAgent {
     // Simulate scanning the codebase
     const scanToolCall = await this.createToolCall(
       sessionId,
-      'Scanning Angular project',
-      'search',
+      "Scanning Angular project",
+      "search",
       { path: session.cwd }
     );
 
-    await this.sendThought(sessionId, 'Analyzing TypeScript files for Angular patterns...');
+    await this.sendThought(
+      sessionId,
+      "Analyzing TypeScript files for Angular patterns..."
+    );
 
     // Update tool call with results
     await this.updateToolCall(sessionId, scanToolCall.toolCallId, {
-      status: 'completed',
+      status: "completed",
       rawOutput: {
         ngModules: 15,
         components: 47,
@@ -353,8 +447,8 @@ class AngularMigrationAgent {
     });
 
     // Update plan
-    plan.entries[0].status = 'completed';
-    plan.entries[1].status = 'in_progress';
+    plan.entries[0].status = "completed";
+    plan.entries[1].status = "in_progress";
     await this.sendPlan(sessionId, plan);
 
     // Generate report
@@ -362,7 +456,7 @@ class AngularMigrationAgent {
     await this.sendMessage(sessionId, reportContent);
 
     // Final plan update
-    plan.entries.forEach(entry => entry.status = 'completed');
+    plan.entries.forEach((entry) => (entry.status = "completed"));
     await this.sendPlan(sessionId, plan);
   }
 
@@ -429,15 +523,33 @@ Would you like me to:
 
   // ===== Standalone Migration =====
 
-  private async migrateToStandalone(sessionId: SessionId, session: SessionState): Promise<void> {
-    await this.sendThought(sessionId, 'Preparing standalone components migration...');
+  private async migrateToStandalone(
+    sessionId: SessionId,
+    session: SessionState
+  ): Promise<void> {
+    await this.sendThought(
+      sessionId,
+      "Preparing standalone components migration..."
+    );
 
     const plan: Plan = {
       entries: [
-        { content: 'Backup current code', priority: 'high', status: 'in_progress' },
-        { content: 'Run standalone migration schematic', priority: 'high', status: 'pending' },
-        { content: 'Update imports and providers', priority: 'high', status: 'pending' },
-        { content: 'Validate build', priority: 'high', status: 'pending' },
+        {
+          content: "Backup current code",
+          priority: "high",
+          status: "in_progress",
+        },
+        {
+          content: "Run standalone migration schematic",
+          priority: "high",
+          status: "pending",
+        },
+        {
+          content: "Update imports and providers",
+          priority: "high",
+          status: "pending",
+        },
+        { content: "Validate build", priority: "high", status: "pending" },
       ],
     };
 
@@ -446,31 +558,36 @@ Would you like me to:
     // Create tool call for migration
     const migrationTool = await this.createToolCall(
       sessionId,
-      'Migrating to standalone components',
-      'execute',
-      { command: 'ng generate @angular/core:standalone' }
+      "Migrating to standalone components",
+      "execute",
+      { command: "ng generate @angular/core:standalone" }
     );
 
-    await this.sendThought(sessionId, 'Running Angular standalone migration schematic...');
+    await this.sendThought(
+      sessionId,
+      "Running Angular standalone migration schematic..."
+    );
 
     // Simulate migration progress
     await this.updateToolCall(sessionId, migrationTool.toolCallId, {
-      status: 'in_progress',
-      content: [{
-        type: 'content',
-        content: {
-          type: 'text',
-          text: '✓ Converting components to standalone...\n✓ Updating imports...\n✓ Migrating providers...',
+      status: "in_progress",
+      content: [
+        {
+          type: "content",
+          content: {
+            type: "text",
+            text: "✓ Converting components to standalone...\n✓ Updating imports...\n✓ Migrating providers...",
+          },
         },
-      }],
+      ],
     });
 
-    plan.entries[0].status = 'completed';
-    plan.entries[1].status = 'completed';
+    plan.entries[0].status = "completed";
+    plan.entries[1].status = "completed";
     await this.sendPlan(sessionId, plan);
 
     await this.updateToolCall(sessionId, migrationTool.toolCallId, {
-      status: 'completed',
+      status: "completed",
       rawOutput: {
         componentsConverted: 47,
         modulesRemoved: 12,
@@ -478,7 +595,9 @@ Would you like me to:
       },
     });
 
-    await this.sendMessage(sessionId, `## Standalone Migration Complete! ✅
+    await this.sendMessage(
+      sessionId,
+      `## Standalone Migration Complete! ✅
 
 **Changes Applied:**
 - ✓ 47 components converted to standalone
@@ -496,26 +615,36 @@ Would you like me to:
 - \`src/main.ts\` - Updated bootstrap
 - \`src/app/**/*.component.ts\` - All components now standalone
 
-Would you like me to proceed with control flow migration next?`);
+Would you like me to proceed with control flow migration next?`
+    );
   }
 
   // ===== Control Flow Migration =====
 
-  private async migrateControlFlow(sessionId: SessionId, session: SessionState): Promise<void> {
-    await this.sendThought(sessionId, 'Migrating template syntax to new control flow...');
+  private async migrateControlFlow(
+    sessionId: SessionId,
+    session: SessionState
+  ): Promise<void> {
+    await this.sendThought(
+      sessionId,
+      "Migrating template syntax to new control flow..."
+    );
 
     const migrationTool = await this.createToolCall(
       sessionId,
-      'Migrating control flow syntax',
-      'edit',
-      { files: '**/*.html' }
+      "Migrating control flow syntax",
+      "edit",
+      { files: "**/*.html" }
     );
 
-    await this.sendThought(sessionId, 'Converting *ngIf, *ngFor, *ngSwitch to @if, @for, @switch...');
+    await this.sendThought(
+      sessionId,
+      "Converting *ngIf, *ngFor, *ngSwitch to @if, @for, @switch..."
+    );
 
     // Show example diff
     const exampleDiff: ContentBlock = {
-      type: 'text',
+      type: "text",
       text: `\`\`\`diff
 - <div *ngIf="isVisible">Content</div>
 + @if (isVisible) {
@@ -539,8 +668,8 @@ Would you like me to proceed with control flow migration next?`);
     };
 
     await this.updateToolCall(sessionId, migrationTool.toolCallId, {
-      status: 'completed',
-      content: [{ type: 'content', content: exampleDiff }],
+      status: "completed",
+      content: [{ type: "content", content: exampleDiff }],
       rawOutput: {
         filesModified: 32,
         ngIfConverted: 45,
@@ -549,7 +678,9 @@ Would you like me to proceed with control flow migration next?`);
       },
     });
 
-    await this.sendMessage(sessionId, `## Control Flow Migration Complete! ✅
+    await this.sendMessage(
+      sessionId,
+      `## Control Flow Migration Complete! ✅
 
 **Changes Applied:**
 - ✓ 32 template files updated
@@ -563,15 +694,24 @@ Would you like me to proceed with control flow migration next?`);
 - ✅ More readable templates
 - ✅ Future-proof (old syntax deprecated)
 
-Run \`npm run build\` to verify the changes!`);
+Run \`npm run build\` to verify the changes!`
+    );
   }
 
   // ===== Signal Migration =====
 
-  private async migrateToSignals(sessionId: SessionId, session: SessionState): Promise<void> {
-    await this.sendThought(sessionId, 'Analyzing components for signal migration...');
+  private async migrateToSignals(
+    sessionId: SessionId,
+    session: SessionState
+  ): Promise<void> {
+    await this.sendThought(
+      sessionId,
+      "Analyzing components for signal migration..."
+    );
 
-    await this.sendMessage(sessionId, `## Signal Migration Strategy
+    await this.sendMessage(
+      sessionId,
+      `## Signal Migration Strategy
 
 **What are Signals?**
 Angular Signals are reactive primitives for fine-grained change detection, providing better performance and simpler reactivity than RxJS for many use cases.
@@ -623,27 +763,61 @@ export class CounterComponent {
 - Gradually migrate existing components
 - Keep complex RxJS streams as-is (signals work alongside RxJS)
 
-Would you like me to convert specific components to signals?`);
+Would you like me to convert specific components to signals?`
+    );
   }
 
   // ===== Full Migration =====
 
-  private async performFullMigration(sessionId: SessionId, session: SessionState): Promise<void> {
+  private async performFullMigration(
+    sessionId: SessionId,
+    session: SessionState
+  ): Promise<void> {
     const fullPlan: Plan = {
       entries: [
-        { content: 'Update Angular CLI and Core to v20', priority: 'high', status: 'in_progress' },
-        { content: 'Migrate to standalone components', priority: 'high', status: 'pending' },
-        { content: 'Update control flow syntax', priority: 'high', status: 'pending' },
-        { content: 'Migrate Angular Material to v20', priority: 'high', status: 'pending' },
-        { content: 'Convert inputs/outputs to signals', priority: 'medium', status: 'pending' },
-        { content: 'Run tests and fix issues', priority: 'high', status: 'pending' },
-        { content: 'Generate migration summary', priority: 'medium', status: 'pending' },
+        {
+          content: "Update Angular CLI and Core to v20",
+          priority: "high",
+          status: "in_progress",
+        },
+        {
+          content: "Migrate to standalone components",
+          priority: "high",
+          status: "pending",
+        },
+        {
+          content: "Update control flow syntax",
+          priority: "high",
+          status: "pending",
+        },
+        {
+          content: "Migrate Angular Material to v20",
+          priority: "high",
+          status: "pending",
+        },
+        {
+          content: "Convert inputs/outputs to signals",
+          priority: "medium",
+          status: "pending",
+        },
+        {
+          content: "Run tests and fix issues",
+          priority: "high",
+          status: "pending",
+        },
+        {
+          content: "Generate migration summary",
+          priority: "medium",
+          status: "pending",
+        },
       ],
     };
 
     await this.sendPlan(sessionId, fullPlan);
 
-    await this.sendMessage(sessionId, `## Full Angular 14→20 Migration
+    await this.sendMessage(
+      sessionId,
+      `## Full Angular 14→20 Migration
 
 I'll guide you through the complete migration process. This will take several steps.
 
@@ -684,13 +858,17 @@ npm test
 Would you like me to:
 1. Generate a detailed step-by-step migration script?
 2. Start with the first phase (dependency updates)?
-3. Create backup and rollback instructions?`);
+3. Create backup and rollback instructions?`
+    );
   }
 
   // ===== General Guidance =====
 
-  private async provideGuidance(sessionId: SessionId, query: string): Promise<void> {
-    await this.sendThought(sessionId, 'Analyzing your question...');
+  private async provideGuidance(
+    sessionId: SessionId,
+    query: string
+  ): Promise<void> {
+    await this.sendThought(sessionId, "Analyzing your question...");
 
     const guidance = `## Angular Migration Guidance
 
@@ -724,20 +902,24 @@ Just tell me what you need, and I'll help guide you through the migration!`;
 
   private extractTextFromPrompt(prompt: ContentBlock[]): string {
     return prompt
-      .filter(block => block.type === 'text')
-      .map(block => (block as any).text)
-      .join(' ')
+      .filter((block) => block.type === "text")
+      .map((block) => (block as any).text)
+      .join(" ")
       .toLowerCase();
   }
 
   private isMigrationAnalysisRequest(query: string): boolean {
-    return /\b(analyze|analysis|scan|check|what|needs?)\b/.test(query) &&
-           /\b(migration|migrate|upgrade|update)\b/.test(query);
+    return (
+      /\b(analyze|analysis|scan|check|what|needs?)\b/.test(query) &&
+      /\b(migration|migrate|upgrade|update)\b/.test(query)
+    );
   }
 
   private isStandaloneMigrationRequest(query: string): boolean {
-    return /\b(standalone|convert|migrate)\b/.test(query) &&
-           /\b(component|module)\b/.test(query);
+    return (
+      /\b(standalone|convert|migrate)\b/.test(query) &&
+      /\b(component|module)\b/.test(query)
+    );
   }
 
   private isControlFlowMigrationRequest(query: string): boolean {
@@ -745,24 +927,31 @@ Just tell me what you need, and I'll help guide you through the migration!`;
   }
 
   private isSignalMigrationRequest(query: string): boolean {
-    return /\b(signal|reactive|input\(\)|output\(\)|computed|effect)\b/.test(query);
+    return /\b(signal|reactive|input\(\)|output\(\)|computed|effect)\b/.test(
+      query
+    );
   }
 
   private isFullMigrationRequest(query: string): boolean {
-    return /\b(full|complete|entire|everything|all)\b/.test(query) &&
-           /\b(migration|migrate|upgrade)\b/.test(query);
+    return (
+      /\b(full|complete|entire|everything|all)\b/.test(query) &&
+      /\b(migration|migrate|upgrade)\b/.test(query)
+    );
   }
 
   private isStepByStepMigrationRequest(query: string): boolean {
-    return /\b(step[- ]by[- ]step|incremental|guided|workflow)\b/i.test(query) ||
-           (/\b(start|begin|run)\b/i.test(query) && /\b(migration|workflow)\b/i.test(query));
+    return (
+      /\b(step[- ]by[- ]step|incremental|guided|workflow)\b/i.test(query) ||
+      (/\b(start|begin|run)\b/i.test(query) &&
+        /\b(migration|workflow)\b/i.test(query))
+    );
   }
 
   private async sendMessage(sessionId: SessionId, text: string): Promise<void> {
     await this.sendUpdate(sessionId, {
-      sessionUpdate: 'agent_message_chunk',
+      sessionUpdate: "agent_message_chunk",
       content: {
-        type: 'text',
+        type: "text",
         text,
       },
     });
@@ -770,9 +959,9 @@ Just tell me what you need, and I'll help guide you through the migration!`;
 
   private async sendThought(sessionId: SessionId, text: string): Promise<void> {
     await this.sendUpdate(sessionId, {
-      sessionUpdate: 'agent_thought_chunk',
+      sessionUpdate: "agent_thought_chunk",
       content: {
-        type: 'text',
+        type: "text",
         text,
       },
     });
@@ -780,7 +969,7 @@ Just tell me what you need, and I'll help guide you through the migration!`;
 
   private async sendPlan(sessionId: SessionId, plan: Plan): Promise<void> {
     await this.sendUpdate(sessionId, {
-      sessionUpdate: 'plan',
+      sessionUpdate: "plan",
       plan,
     });
   }
@@ -788,23 +977,25 @@ Just tell me what you need, and I'll help guide you through the migration!`;
   private async createToolCall(
     sessionId: SessionId,
     title: string,
-    kind: ToolCall['kind'],
+    kind: ToolCall["kind"],
     input: Record<string, unknown>
   ): Promise<ToolCall> {
-    const toolCallId = `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
+    const toolCallId = `tool-${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
+
     const toolCall: ToolCall = {
       toolCallId,
       title,
       kind,
-      status: 'in_progress',
+      status: "in_progress",
       rawInput: input,
       content: [],
       locations: [],
     };
 
     await this.sendUpdate(sessionId, {
-      sessionUpdate: 'tool_call',
+      sessionUpdate: "tool_call",
       toolCall,
     });
 
@@ -817,7 +1008,7 @@ Just tell me what you need, and I'll help guide you through the migration!`;
     update: Partial<ToolCallUpdate>
   ): Promise<void> {
     await this.sendUpdate(sessionId, {
-      sessionUpdate: 'tool_call_update',
+      sessionUpdate: "tool_call_update",
       update: {
         toolCallId,
         ...update,
@@ -825,9 +1016,14 @@ Just tell me what you need, and I'll help guide you through the migration!`;
     });
   }
 
-  private async sendUpdate(sessionId: SessionId, update: SessionUpdate): Promise<void> {
-    process.stderr.write(`[Agent] sendUpdate called: sessionUpdate=${update.sessionUpdate}\n`);
-    this.transport.sendNotification('session/update', {
+  private async sendUpdate(
+    sessionId: SessionId,
+    update: SessionUpdate
+  ): Promise<void> {
+    process.stderr.write(
+      `[Agent] sendUpdate called: sessionUpdate=${update.sessionUpdate}\n`
+    );
+    this.transport.sendNotification("session/update", {
       sessionId,
       update,
     });
@@ -840,7 +1036,7 @@ Just tell me what you need, and I'll help guide you through the migration!`;
   start(): void {
     // Agent is ready and listening on stdin/stdout
     logConfig();
-    process.stderr.write('[Angular Migration Agent] Started and ready\n');
+    process.stderr.write("[Angular Migration Agent] Started and ready\n");
   }
 }
 
