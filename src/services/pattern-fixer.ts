@@ -241,14 +241,11 @@ export const PATTERN_FIXES: PatternFix[] = [
   
   {
     name: 'fix-ngx-perfect-scrollbar-ivy',
-    description: 'Fix ngx-perfect-scrollbar Ivy compatibility by upgrading to latest version',
-    detect: (error) => /PerfectScrollbarModule.*does not appear to be an NgModule|PerfectScrollbarModule.*not compatible with Angular Ivy/i.test(error),
+    description: 'Remove deprecated ngx-perfect-scrollbar and replace with native scrolling (Angular 16+)',
+    detect: (error) => /PerfectScrollbarModule.*does not appear to be an NgModule|PerfectScrollbarModule.*not compatible with Angular Ivy|NG6002.*PerfectScrollbarModule/i.test(error),
     fix: async (projectRoot) => [
-      // Upgrade to latest version that supports Ivy (v10+)
-      `cd ${projectRoot} && npm install ngx-perfect-scrollbar@latest --save --legacy-peer-deps`,
-      
-      // If still having issues, remove and reinstall
-      `cd ${projectRoot} && npm uninstall ngx-perfect-scrollbar && npm install ngx-perfect-scrollbar@latest --save --legacy-peer-deps`,
+      // Run the comprehensive fix script
+      `bash ${__dirname}/../../scripts/fix-angular-16-breaking-changes.sh ${projectRoot}`,
     ],
   },
   

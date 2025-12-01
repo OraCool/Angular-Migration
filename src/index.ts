@@ -183,6 +183,45 @@ class AngularMigrationAgent {
   ): Promise<void> {
     if (!session.awaitingConfirmation) return;
 
+    const confirmationType = session.awaitingConfirmation.type;
+
+    // Special handling for resume-choice: accepts "resume" or "fresh"
+    if (confirmationType === 'resume-choice') {
+      const choice = userQuery.toLowerCase().trim();
+      const data = session.awaitingConfirmation.data as { checkpoint?: any; options?: any } | undefined;
+      const options = data?.options || {};
+
+      if (choice === 'resume') {
+        // Resume from checkpoint - pass special flag to skip prompt
+        session.awaitingConfirmation = undefined;
+
+        await this.sendThought(sessionId, 'Resuming from previous checkpoint...');
+        await this.workflowHandler.startWorkflow(sessionId, session, {
+          ...options, // Preserve original options
+          resumeFromStep: 'resume', // This will skip the checkpoint prompt
+        });
+      } else if (choice === 'fresh') {
+        // Delete checkpoint and start fresh
+        session.awaitingConfirmation = undefined;
+
+        await this.sendThought(sessionId, 'Deleting previous checkpoint...');
+        await this.workflowHandler.deleteCheckpoint(sessionId);
+        await this.sendThought(sessionId, 'Starting fresh migration...');
+
+        // Restart the workflow fresh with original options
+        await this.workflowHandler.startWorkflow(sessionId, session, {
+          ...options, // Preserve original options (including customFolder)
+        });
+      } else {
+        await this.sendMessage(
+          sessionId,
+          '⚠️ Invalid choice. Please type **"resume"** or **"fresh"**.'
+        );
+      }
+      return;
+    }
+
+    // Standard yes/no confirmation
     const confirmed = /\b(yes|y|confirm|proceed|continue|ok|sure)\b/i.test(userQuery);
     const denied = /\b(no|n|cancel|stop|abort|skip)\b/i.test(userQuery);
 
@@ -194,7 +233,6 @@ class AngularMigrationAgent {
       return;
     }
 
-    const confirmationType = session.awaitingConfirmation.type;
     session.awaitingConfirmation = undefined;
 
     if (confirmationType === 'workflow-step') {

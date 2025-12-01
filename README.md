@@ -17,8 +17,27 @@ This agent provides intelligent assistance for:
 ## Prerequisites
 
 - Node.js 18+ and npm
+- [NVM (Node Version Manager)](https://github.com/nvm-sh/nvm) - **Recommended** for automatic version switching
 - [Zed IDE](https://zed.dev/) installed
 - An Angular 14 project to migrate
+
+### ⚠️ Important: Node Version Management
+
+The migration agent **cannot** switch Node.js versions while running. You must start the server with a compatible Node version (18.x or 20.x).
+
+**Use the startup script (recommended):**
+```bash
+./start-migration.sh  # Automatically switches to correct Node version
+```
+
+**Or manually switch before starting:**
+```bash
+nvm use 18  # For Angular 14-16
+npm run build
+npm start
+```
+
+See [docs/NODE_VERSION_MANAGEMENT.md](./docs/NODE_VERSION_MANAGEMENT.md) for details.
 
 ## Installation
 

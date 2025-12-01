@@ -10,8 +10,79 @@
 
 import type { MigrationState, StepExecutionData } from '../state.js';
 import { WorkflowExecutor } from '../../executor.js';
-import { WorkflowEngine, type WorkflowStep, type WorkflowContext } from '../../engine.js';
+import { WorkflowEngine, type WorkflowStep, type WorkflowContext, type WorkflowAction } from '../../engine.js';
 import type { SessionId } from '../../../types/acp.js';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+/**
+ * Get required Node version for a given Angular version
+ */
+function getRequiredNodeVersion(angularVersion: string): string {
+  const version = parseInt(angularVersion, 10);
+
+  // Map Angular versions to Node major versions
+  if (version >= 19) return '22';
+  if (version >= 17) return '20';
+  if (version >= 16) return '18';
+  if (version >= 14) return '18';
+
+  return '18'; // Default to Node 18
+}
+
+/**
+ * Wrap a command with the Node version management script
+ * This ensures the command runs with the correct Node.js version
+ */
+function wrapCommandWithNodeVersion(
+  command: string,
+  requiredNodeVersion: string,
+  projectPath: string
+): string {
+  // Use import.meta.url to get current file location (ES module)
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+
+  // Script is copied to dist/scripts during build
+  const scriptPath = join(__dirname, '../../../scripts/run-migration-step.sh');
+
+  // Replace relative script paths with absolute paths from agent directory
+  // This handles commands like "bash ./scripts/update-all-packages.sh 15"
+  const agentScriptsDir = join(__dirname, '../../../scripts');
+
+  const processedCommand = command.replace(
+    /bash\s+\.\/scripts\/([^\s]+)/g,
+    (_match, scriptName) => `bash "${join(agentScriptsDir, scriptName)}"`
+  );
+
+  // Escape any single quotes in the command
+  const escapedCommand = processedCommand.replace(/'/g, "'\\''");
+
+  const finalWrapped = `bash "${scriptPath}" "${requiredNodeVersion}" "${projectPath}" '${escapedCommand}'`;
+
+  return finalWrapped;
+}
+
+/**
+ * Wrap an action's command with Node version management
+ */
+function wrapAction(action: WorkflowAction, step: WorkflowStep, projectPath: string, currentVersion: string): WorkflowAction {
+  const wrappedAction = { ...action };
+
+  if (action.command) {
+    const requiredNodeVersion = step.version
+      ? getRequiredNodeVersion(step.version)
+      : getRequiredNodeVersion(currentVersion);
+
+    wrappedAction.command = wrapCommandWithNodeVersion(
+      action.command,
+      requiredNodeVersion,
+      projectPath
+    );
+  }
+
+  return wrappedAction;
+}
 
 /**
  * Execute a single migration step
@@ -63,9 +134,12 @@ export async function stepExecutorNode(
   try {
     // Execute all actions for this step
     for (const action of step.actions) {
+      // Wrap the action command with Node version management
+      const wrappedAction = wrapAction(action, step, state.projectPath, state.currentVersion);
+
       const result = step.retry
-        ? await executor.executeActionWithRetry(action, step.id, step.retry)
-        : await executor.executeAction(action);
+        ? await executor.executeActionWithRetry(wrappedAction, step.id, step.retry)
+        : await executor.executeAction(wrappedAction);
 
       if (!result.success) {
         return {
@@ -81,9 +155,14 @@ export async function stepExecutorNode(
 
     // Execute all validations
     for (const validation of step.validations) {
+      // Wrap validation command with Node version management if it has a command
+      const wrappedValidation = validation.command
+        ? { ...validation, command: wrapCommandWithNodeVersion(validation.command, step.version ? getRequiredNodeVersion(step.version) : getRequiredNodeVersion(state.currentVersion), state.projectPath) }
+        : validation;
+
       const result = step.retry
-        ? await executor.executeValidationWithRetry(validation, step.id, step.retry)
-        : await executor.executeValidation(validation);
+        ? await executor.executeValidationWithRetry(wrappedValidation, step.id, step.retry)
+        : await executor.executeValidation(wrappedValidation);
 
       stepData.validationResults.push(result);
 

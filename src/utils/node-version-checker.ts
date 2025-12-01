@@ -186,45 +186,211 @@ export function findBestMatch(
 
 /**
  * Switch Node version using NVM
+ * Automatically falls back to install if version is not yet installed
  */
-export async function switchNodeVersion(version: string): Promise<boolean> {
+export async function switchNodeVersion(
+  version: string,
+  onMessage?: (message: string) => Promise<void>
+): Promise<boolean> {
   try {
     const { stdout, stderr } = await execAsync(
       `bash -c "source ~/.nvm/nvm.sh 2>/dev/null && nvm use ${version}" || bash -c "source ~/.bashrc 2>/dev/null && nvm use ${version}" || bash -c "source ~/.zshrc 2>/dev/null && nvm use ${version}"`,
       { shell: '/bin/bash' }
     );
-    
+
     console.log(`[NVM] ${stdout}`);
     if (stderr) {
       console.error(`[NVM] ${stderr}`);
     }
-    
+
+    // Check if version is not installed
+    const combinedOutput = stdout + stderr;
+    if (/not yet installed|N\/A: version.*is not yet installed/i.test(combinedOutput)) {
+      console.log(`[NVM] Version ${version} not installed. Installing...`);
+      if (onMessage) {
+        await onMessage(`📦 Node.js ${version} is not installed. Installing automatically...`);
+      }
+
+      // Automatically install the version
+      const installed = await installNodeVersion(version, onMessage);
+      if (!installed) {
+        console.error(`[NVM] Failed to install Node ${version}`);
+        if (onMessage) {
+          await onMessage(`❌ Failed to install Node.js ${version}`);
+        }
+        return false;
+      }
+
+      // Installation automatically switches to the new version, verify it
+      const currentVersion = await getCurrentNodeVersion();
+      const switched = currentVersion.startsWith(version.split('.')[0]);
+
+      if (!switched) {
+        console.error(`[NVM] Version mismatch after install. Expected ${version}, got ${currentVersion}`);
+        if (onMessage) {
+          await onMessage(`❌ Version mismatch after install. Expected ${version}, got ${currentVersion}`);
+        }
+        return false;
+      }
+
+      console.log(`[NVM] ✅ Successfully installed and switched to Node ${currentVersion}`);
+      if (onMessage) {
+        await onMessage(`✅ Successfully installed and switched to Node.js ${currentVersion}`);
+      }
+      return true;
+    }
+
+    // Verify the switch actually worked by checking current version
+    const currentVersion = await getCurrentNodeVersion();
+    const switched = currentVersion.startsWith(version.split('.')[0]); // Check major version matches
+
+    if (!switched) {
+      console.error(`[NVM] Version mismatch after switch. Expected ${version}, got ${currentVersion}`);
+      console.log(`[NVM] Switch verification failed. Attempting to install ${version}...`);
+      if (onMessage) {
+        await onMessage(`📦 Switch verification failed (still on ${currentVersion}). Installing Node.js ${version}...`);
+      }
+
+      // Try installing the version
+      const installed = await installNodeVersion(version, onMessage);
+      if (!installed) {
+        console.error(`[NVM] Failed to install Node ${version}`);
+        if (onMessage) {
+          await onMessage(`❌ Failed to install Node.js ${version}`);
+        }
+        return false;
+      }
+
+      // Verify installation worked
+      const newVersion = await getCurrentNodeVersion();
+      const nowSwitched = newVersion.startsWith(version.split('.')[0]);
+
+      if (!nowSwitched) {
+        console.error(`[NVM] Still version mismatch after install. Expected ${version}, got ${newVersion}`);
+        if (onMessage) {
+          await onMessage(`❌ Version mismatch after install. Expected ${version}, got ${newVersion}`);
+        }
+        return false;
+      }
+
+      console.log(`[NVM] ✅ Successfully installed and switched to Node ${newVersion}`);
+      if (onMessage) {
+        await onMessage(`✅ Successfully installed and switched to Node.js ${newVersion}`);
+      }
+      return true;
+    }
+
+    console.log(`[NVM] ✅ Successfully switched to Node ${currentVersion}`);
     return true;
   } catch (error) {
-    console.error(`[NVM] Failed to switch to Node ${version}:`, error);
-    return false;
+    // Switch failed - try to install the version as a fallback
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Also check stdout/stderr from the error if available
+    const errorWithOutput = error as any;
+    const combinedOutput = (errorWithOutput.stdout || '') + (errorWithOutput.stderr || '') + errorMessage;
+
+    console.error(`[NVM] Failed to switch to Node ${version}:`, errorMessage);
+    if (errorWithOutput.stderr) {
+      console.error(`[NVM] stderr:`, errorWithOutput.stderr);
+    }
+    if (errorWithOutput.stdout) {
+      console.error(`[NVM] stdout:`, errorWithOutput.stdout);
+    }
+
+    // Check if it's a "not installed" error OR just try to install as fallback
+    const isNotInstalled = /not yet installed|N\/A: version|not installed|No such file/i.test(combinedOutput);
+
+    if (isNotInstalled || true) { // Always try to install if switch fails
+      console.log(`[NVM] Attempting to install Node ${version} as fallback...`);
+      if (onMessage) {
+        await onMessage(`📦 Switch failed. Attempting to install Node.js ${version}...`);
+      }
+
+      // Automatically install the version
+      try {
+        const installed = await installNodeVersion(version, onMessage);
+        if (!installed) {
+          console.error(`[NVM] Failed to install Node ${version}`);
+          if (onMessage) {
+            await onMessage(`❌ Failed to install Node.js ${version}`);
+          }
+          return false;
+        }
+
+        // Installation automatically switches to the new version, verify it
+        const currentVersion = await getCurrentNodeVersion();
+        const switched = currentVersion.startsWith(version.split('.')[0]);
+
+        if (!switched) {
+          console.error(`[NVM] Version mismatch after install. Expected ${version}, got ${currentVersion}`);
+          if (onMessage) {
+            await onMessage(`❌ Version mismatch after install. Expected ${version}, got ${currentVersion}`);
+          }
+          return false;
+        }
+
+        console.log(`[NVM] ✅ Successfully installed and switched to Node ${currentVersion}`);
+        if (onMessage) {
+          await onMessage(`✅ Successfully installed and switched to Node.js ${currentVersion}`);
+        }
+        return true;
+      } catch (installError) {
+        console.error(`[NVM] Installation failed:`, installError);
+        if (onMessage) {
+          await onMessage(`❌ Installation failed: ${installError}`);
+        }
+        return false;
+      }
+    }
   }
 }
 
 /**
  * Install Node version using NVM
  */
-export async function installNodeVersion(version: string): Promise<boolean> {
+export async function installNodeVersion(
+  version: string,
+  onMessage?: (message: string) => Promise<void>
+): Promise<boolean> {
   try {
     console.log(`[NVM] Installing Node.js ${version}...`);
+    if (onMessage) {
+      await onMessage(`⏳ Installing Node.js ${version}... (this may take a few minutes)`);
+    }
+
     const { stdout, stderr } = await execAsync(
       `bash -c "source ~/.nvm/nvm.sh 2>/dev/null && nvm install ${version}" || bash -c "source ~/.bashrc 2>/dev/null && nvm install ${version}" || bash -c "source ~/.zshrc 2>/dev/null && nvm install ${version}"`,
-      { shell: '/bin/bash' }
+      { shell: '/bin/bash', timeout: 300000 } // 5 min timeout for install
     );
-    
+
     console.log(`[NVM] ${stdout}`);
-    if (stderr) {
+    if (stderr && !stderr.includes('Now using')) {
       console.error(`[NVM] ${stderr}`);
     }
-    
+
+    // Verify installation by checking if version is now available
+    const installedVersions = await listNvmVersions();
+    const installed = installedVersions.some(v => v.startsWith(version.split('.')[0]));
+
+    if (!installed) {
+      console.error(`[NVM] Version ${version} not found in installed versions after install`);
+      if (onMessage) {
+        await onMessage(`❌ Version ${version} not found after installation`);
+      }
+      return false;
+    }
+
+    console.log(`[NVM] ✅ Successfully installed Node ${version}`);
+    if (onMessage) {
+      await onMessage(`✅ Successfully installed Node.js ${version}`);
+    }
     return true;
   } catch (error) {
     console.error(`[NVM] Failed to install Node ${version}:`, error);
+    if (onMessage) {
+      await onMessage(`❌ Failed to install Node.js ${version}: ${error}`);
+    }
     return false;
   }
 }

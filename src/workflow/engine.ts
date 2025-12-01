@@ -29,12 +29,14 @@ export interface RetryConfig {
 }
 
 export interface WorkflowAction {
-  type: 'script' | 'command' | 'schematic' | 'manual' | 'auto-fix';
+  type: 'script' | 'command' | 'schematic' | 'manual' | 'auto-fix' | 'tool';
   name: string;
   command?: string;
   scriptPath?: string;
   args?: string[];
   workingDir?: string;
+  toolName?: string; // For tool actions: name of ACP tool to invoke
+  toolParams?: Record<string, any>; // For tool actions: parameters to pass to tool
   description: string;
   timeout?: number; // milliseconds
   errorPattern?: string; // For auto-fix: pattern to match in errors
@@ -54,7 +56,9 @@ export interface WorkflowValidation {
 
 export interface WorkflowState {
   currentStepIndex: number;
+  currentActionIndex: number; // Track which action within current step (0-based)
   completedSteps: string[];
+  completedActions: Map<string, string[]>; // stepId -> [completed action names]
   failedSteps: string[];
   backupPath?: string;
   pendingConfirmation?: {
@@ -176,11 +180,19 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     },
     actions: [
       {
+        type: 'tool',
+        name: 'update-package-json-v15',
+        toolName: 'update_packages',
+        toolParams: { targetVersion: '15' },
+        description: 'Update ALL packages (Angular, Material, TypeScript, ag-grid, etc.) to v15 compatible versions',
+        timeout: 600000, // 10 minutes for npm install
+      },
+      {
         type: 'command',
-        name: 'ng-update-v15',
-        command: 'ng update @angular/core@15 @angular/cli@15 @angular/material@15 --allow-dirty --force',
-        description: 'Update Angular and Material to version 15 (combined to avoid migration issues)',
-        timeout: 300000, // 5 minutes
+        name: 'run-migrations-v15',
+        command: 'npx ng update @angular/core@15 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular 15 migration schematics (if any)',
+        timeout: 180000,
       },
       {
         type: 'auto-fix',
@@ -261,6 +273,14 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
         command: 'ng generate @angular/core:standalone',
         description: 'Run standalone components migration schematic',
       },
+      {
+        type: 'tool',
+        name: 'fix-standalone-issues',
+        toolName: 'fix_standalone_issues',
+        toolParams: {},
+        description: 'Fix common issues after standalone migration (Material Chips API, missing dependencies)',
+        timeout: 300000,
+      },
     ],
     validations: [
       {
@@ -336,17 +356,26 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     },
     actions: [
       {
-        type: 'command',
-        name: 'ng-update-v16',
-        command: 'ng update @angular/core@16 @angular/cli@16 --allow-dirty --force',
-        description: 'Update Angular to version 16',
+        type: 'tool',
+        name: 'update-package-json-v16',
+        toolName: 'update_packages',
+        toolParams: { targetVersion: '16' },
+        description: 'Update ALL packages (Angular, Material, TypeScript, ag-grid, etc.) to v16 compatible versions',
+        timeout: 600000,
+      },
+      {
+        type: 'tool',
+        name: 'fix-breaking-changes-v16',
+        toolName: 'fix_breaking_changes',
+        toolParams: { version: '16' },
+        description: 'Fix Angular 16 breaking changes (Material Chips API, remove PerfectScrollbar)',
         timeout: 300000,
       },
       {
         type: 'command',
-        name: 'update-material-v16',
-        command: 'ng update @angular/material@16 --allow-dirty --force',
-        description: 'Update Angular Material to version 16',
+        name: 'run-migrations-v16',
+        command: 'npx ng update @angular/core@16 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular 16 migration schematics (if any)',
         timeout: 180000,
       },
     ],
@@ -396,7 +425,7 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
   {
     id: 'upgrade-v17',
     title: 'Upgrade to Angular 17',
-    description: 'Update Angular from v16 to v17 (New Control Flow syntax)',
+    description: 'Update Angular from v16 to v17 (Material MDC migration, New Control Flow syntax)',
     version: '17',
     requiresConfirmation: true,
     requiresBackup: false,
@@ -416,17 +445,26 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     },
     actions: [
       {
-        type: 'command',
-        name: 'ng-update-v17',
-        command: 'ng update @angular/core@17 @angular/cli@17 --allow-dirty --force',
-        description: 'Update Angular to version 17',
+        type: 'tool',
+        name: 'update-package-json-v17',
+        toolName: 'update_packages',
+        toolParams: { targetVersion: '17' },
+        description: 'Update ALL packages (Angular, Material, TypeScript, ag-grid, etc.) to v17 compatible versions',
+        timeout: 600000,
+      },
+      {
+        type: 'tool',
+        name: 'fix-breaking-changes-v17',
+        toolName: 'fix_breaking_changes',
+        toolParams: { version: '17' },
+        description: 'Fix Angular 17 breaking changes (Material MDC migration, legacy components removal)',
         timeout: 300000,
       },
       {
         type: 'command',
-        name: 'update-material-v17',
-        command: 'ng update @angular/material@17 --allow-dirty --force',
-        description: 'Update Angular Material to version 17',
+        name: 'run-migrations-v17',
+        command: 'npx ng update @angular/core@17 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular 17 migration schematics (if any)',
         timeout: 180000,
       },
     ],
@@ -530,17 +568,18 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     },
     actions: [
       {
-        type: 'command',
-        name: 'ng-update-v18',
-        command: 'ng update @angular/core@18 @angular/cli@18 --allow-dirty --force',
-        description: 'Update Angular to version 18',
-        timeout: 300000,
+        type: 'tool',
+        name: 'update-package-json-v18',
+        toolName: 'update_packages',
+        toolParams: { targetVersion: '18' },
+        description: 'Update package.json to Angular 18 and reinstall dependencies',
+        timeout: 600000,
       },
       {
         type: 'command',
-        name: 'update-material-v18',
-        command: 'ng update @angular/material@18 --allow-dirty --force',
-        description: 'Update Angular Material to version 18 (Material 3)',
+        name: 'run-migrations-v18',
+        command: 'npx ng update @angular/core@18 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular 18 migration schematics (if any)',
         timeout: 180000,
       },
     ],
@@ -590,7 +629,7 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
   {
     id: 'upgrade-v19',
     title: 'Upgrade to Angular 19',
-    description: 'Update Angular from v18 to v19',
+    description: 'Update Angular from v18 to v19 (AG-Grid v32, Signals stable, Package compatibility)',
     version: '19',
     requiresConfirmation: true,
     requiresBackup: false,
@@ -610,17 +649,26 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     },
     actions: [
       {
-        type: 'command',
-        name: 'ng-update-v19',
-        command: 'ng update @angular/core@19 @angular/cli@19 --allow-dirty --force',
-        description: 'Update Angular to version 19',
+        type: 'tool',
+        name: 'update-package-json-v19',
+        toolName: 'update_packages',
+        toolParams: { targetVersion: '19' },
+        description: 'Update package.json to Angular 19 and reinstall dependencies',
+        timeout: 600000,
+      },
+      {
+        type: 'tool',
+        name: 'fix-breaking-changes-v19',
+        toolName: 'fix_breaking_changes',
+        toolParams: { version: '19' },
+        description: 'Fix Angular 19 breaking changes (AG-Grid v32 row selection, package compatibility warnings)',
         timeout: 300000,
       },
       {
         type: 'command',
-        name: 'update-material-v19',
-        command: 'ng update @angular/material@19 --allow-dirty --force',
-        description: 'Update Angular Material to version 19',
+        name: 'run-migrations-v19',
+        command: 'npx ng update @angular/core@19 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular 19 migration schematics (if any)',
         timeout: 180000,
       },
     ],
@@ -670,7 +718,7 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
   {
     id: 'upgrade-v20',
     title: 'Upgrade to Angular 20',
-    description: 'Update Angular from v19 to v20 (Final target version)',
+    description: 'Update Angular from v19 to v20 (Highcharts v12, Zoneless ready, Material 3, Final target)',
     version: '20',
     requiresConfirmation: true,
     requiresBackup: false,
@@ -690,17 +738,26 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
     },
     actions: [
       {
-        type: 'command',
-        name: 'ng-update-v20',
-        command: 'ng update @angular/core@20 @angular/cli@20 --allow-dirty --force',
-        description: 'Update Angular to version 20',
+        type: 'tool',
+        name: 'update-package-json-v20',
+        toolName: 'update_packages',
+        toolParams: { targetVersion: '20' },
+        description: 'Update package.json to Angular 20 and reinstall dependencies',
+        timeout: 600000,
+      },
+      {
+        type: 'tool',
+        name: 'fix-breaking-changes-v20',
+        toolName: 'fix_breaking_changes',
+        toolParams: { version: '20' },
+        description: 'Fix Angular 20 breaking changes (Highcharts v12, deprecated package replacements, zoneless readiness)',
         timeout: 300000,
       },
       {
         type: 'command',
-        name: 'update-material-v20',
-        command: 'ng update @angular/material@20 --allow-dirty --force',
-        description: 'Update Angular Material to version 20',
+        name: 'run-migrations-v20',
+        command: 'npx ng update @angular/core@20 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular 20 migration schematics (if any)',
         timeout: 180000,
       },
     ],
@@ -793,7 +850,9 @@ export class WorkflowEngine {
     this.stateManager = stateManager;
     this.state = {
       currentStepIndex: 0,
+      currentActionIndex: 0,
       completedSteps: [],
+      completedActions: new Map(),
       failedSteps: [],
       lastValidationResults: new Map(),
       retryAttempts: new Map(),
@@ -886,6 +945,7 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
       this.state.completedSteps.push(currentStep.id);
     }
     this.state.currentStepIndex++;
+    this.state.currentActionIndex = 0; // Reset action index for new step
 
     // Auto-save checkpoint after advancing
     if (this.stateManager) {
@@ -967,6 +1027,46 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
    */
   resetRetryAttempt(stepId: string): void {
     this.state.retryAttempts.delete(stepId);
+  }
+
+  /**
+   * Mark an action as completed for a specific step
+   */
+  markActionCompleted(stepId: string, actionName: string): void {
+    const completedActions = this.state.completedActions.get(stepId) || [];
+    if (!completedActions.includes(actionName)) {
+      completedActions.push(actionName);
+      this.state.completedActions.set(stepId, completedActions);
+    }
+    // Increment action index for current step
+    if (this.getCurrentStep()?.id === stepId) {
+      this.state.currentActionIndex++;
+    }
+  }
+
+  /**
+   * Check if an action is already completed for a specific step
+   */
+  isActionCompleted(stepId: string, actionName: string): boolean {
+    const completedActions = this.state.completedActions.get(stepId) || [];
+    return completedActions.includes(actionName);
+  }
+
+  /**
+   * Get current action index within the current step
+   */
+  getCurrentActionIndex(): number {
+    return this.state.currentActionIndex;
+  }
+
+  /**
+   * Reset action progress for a step (when retrying or restarting)
+   */
+  resetActionProgress(stepId: string): void {
+    this.state.completedActions.delete(stepId);
+    if (this.getCurrentStep()?.id === stepId) {
+      this.state.currentActionIndex = 0;
+    }
   }
 
   isComplete(): boolean {

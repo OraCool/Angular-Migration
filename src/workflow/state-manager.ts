@@ -23,7 +23,9 @@ export interface CheckpointData {
   sessionId: SessionId;
   state: {
     currentStepIndex: number;
+    currentActionIndex: number; // Track which action within current step
     completedSteps: string[];
+    completedActions: Record<string, string[]>; // stepId -> [completed action names]
     failedSteps: string[];
     backupPath?: string;
     pendingConfirmation?: {
@@ -105,6 +107,11 @@ export class StateManager {
         serializedRetryAttempts[stepId] = count;
       });
 
+      const serializedCompletedActions: Record<string, string[]> = {};
+      state.completedActions.forEach((actions, stepId) => {
+        serializedCompletedActions[stepId] = [...actions];
+      });
+
       // Build checkpoint data
       const checkpoint: CheckpointData = {
         version: this.SCHEMA_VERSION,
@@ -112,7 +119,9 @@ export class StateManager {
         sessionId,
         state: {
           currentStepIndex: state.currentStepIndex,
+          currentActionIndex: state.currentActionIndex,
           completedSteps: [...state.completedSteps],
+          completedActions: serializedCompletedActions,
           failedSteps: [...state.failedSteps],
           backupPath: state.backupPath,
           pendingConfirmation: state.pendingConfirmation
@@ -381,9 +390,18 @@ export class StateManager {
       }
     );
 
+    const completedActions = new Map<string, string[]>();
+    Object.entries(checkpointData.state.completedActions || {}).forEach(
+      ([stepId, actions]) => {
+        completedActions.set(stepId, [...actions]);
+      }
+    );
+
     const state: WorkflowState = {
       currentStepIndex: checkpointData.state.currentStepIndex,
+      currentActionIndex: checkpointData.state.currentActionIndex || 0,
       completedSteps: [...checkpointData.state.completedSteps],
+      completedActions,
       failedSteps: [...checkpointData.state.failedSteps],
       backupPath: checkpointData.state.backupPath,
       pendingConfirmation: checkpointData.state.pendingConfirmation,

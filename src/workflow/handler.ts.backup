@@ -47,28 +47,10 @@ export class WorkflowMigrationHandler {
     // Script is copied to dist/scripts during build
     const scriptPath = join(__dirname, '../scripts/run-migration-step.sh');
 
-    // Replace relative script paths with absolute paths from agent directory
-    // This handles commands like "bash ./scripts/update-angular-version.sh 15"
-    const agentScriptsDir = join(__dirname, '../scripts');
-
-    console.log('🔍 DEBUG wrapCommandWithNodeVersion:');
-    console.log('  Original command:', command);
-    console.log('  Agent scripts dir:', agentScriptsDir);
-
-    const processedCommand = command.replace(
-      /bash\s+\.\/scripts\/([^\s]+)/g,
-      (_match, scriptName) => `bash "${join(agentScriptsDir, scriptName)}"`
-    );
-
-    console.log('  Processed command:', processedCommand);
-
     // Escape any single quotes in the command
-    const escapedCommand = processedCommand.replace(/'/g, "'\\''");
+    const escapedCommand = command.replace(/'/g, "'\\''");
 
-    const finalWrapped = `bash "${scriptPath}" "${requiredNodeVersion}" "${projectPath}" '${escapedCommand}'`;
-    console.log('  Final wrapped:', finalWrapped);
-
-    return finalWrapped;
+    return `bash "${scriptPath}" "${requiredNodeVersion}" "${projectPath}" '${escapedCommand}'`;
   }
 
   /**
@@ -117,7 +99,7 @@ export class WorkflowMigrationHandler {
 
       await this.sendMessage(
         sessionId,
-        `## 🔄 Previous Migration Found
+        `## [RESUME] Previous Migration Found
 
 A previous migration was interrupted for this session:
 - **Last completed step:** ${lastCompleted}
@@ -193,7 +175,7 @@ Type **"resume"** to continue or **"fresh"** to restart.`
       if (success) {
         await this.sendMessage(
           sessionId,
-          `🔄 Resuming migration from step: **${engine.getCurrentStep()?.title}**`
+          `📍 Resuming migration from step: **${engine.getCurrentStep()?.title}**`
         );
       } else {
         await this.sendMessage(
@@ -381,13 +363,6 @@ Ready to begin!
 
       // Execute all actions in the step
       for (const action of currentStep.actions) {
-        // Skip action if already completed (resume scenario)
-        if (engine.isActionCompleted(currentStep.id, action.name)) {
-          process.stderr.write(`[Workflow] ⏩ Skipping already-completed action: ${action.name}\n`);
-          await this.sendThought(sessionId, `⏩ Skipping completed action: ${action.name}`);
-          continue;
-        }
-
         // Show action description and command in main conversation (not just thoughts)
         await this.sendMessage(sessionId, `**${action.description}**`);
 
@@ -446,12 +421,6 @@ Ready to begin!
           ],
         });
 
-        // Mark action as completed if successful
-        if (result.success) {
-          engine.markActionCompleted(currentStep.id, action.name);
-          process.stderr.write(`[Workflow] ✅ Action completed: ${action.name} (${engine.getCurrentActionIndex()}/${currentStep.actions.length})\n`);
-        }
-
         if (!result.success) {
           // Try auto-fix for action errors (use LLM if patterns don't match)
           const errorText = result.error || '';
@@ -473,16 +442,13 @@ Ready to begin!
           if (autoFixResult.success) {
             process.stderr.write(`[Auto-Fix] ✅ Fix applied for ${action.name}. Retrying action...\n`);
             await this.sendMessage(sessionId, `✅ **Fix applied**. Retrying ${action.name}...`);
-
-            // Retry the wrapped action (with correct script paths)
-            const retryResult = await executor.executeAction(wrappedAction);
+            
+            // Retry the original action
+            const retryResult = await executor.executeAction(action);
             
             if (retryResult.success) {
               process.stderr.write(`[Auto-Fix] ✅ Action succeeded after auto-fix!\n`);
               await this.sendMessage(sessionId, `✅ **${action.name} succeeded** after auto-fix!`);
-              // Mark action as completed after successful retry
-              engine.markActionCompleted(currentStep.id, action.name);
-              process.stderr.write(`[Workflow] ✅ Action completed after fix: ${action.name} (${engine.getCurrentActionIndex()}/${currentStep.actions.length})\n`);
               // Continue to next action
               continue;
             } else {

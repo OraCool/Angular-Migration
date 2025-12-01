@@ -2,6 +2,40 @@
 
 The Angular Migration Agent automatically checks Node.js version compatibility before each upgrade step and can help you switch to compatible versions using NVM.
 
+## ⚠️ Important: Server Process Limitation
+
+**The migration server cannot switch its own Node.js version while running.**
+
+This is a fundamental limitation: NVM operates by modifying shell environment variables, and a child process (where NVM commands run) cannot modify the parent process's environment.
+
+### What This Means
+
+When the agent runs `nvm install 18.20.8` or `nvm use 18.20.8`:
+- ✅ Command succeeds in the child process
+- ✅ Node version switches **in that subprocess**
+- ❌ Parent server process **remains on original Node version**
+- ❌ Verification fails (parent still shows old version)
+
+### The Solution
+
+**You must start the server with the correct Node version:**
+
+```bash
+# Use the provided startup script (RECOMMENDED)
+./start-migration.sh
+
+# OR manually switch before starting
+nvm use 18
+npm start
+
+# OR create .nvmrc and auto-switch
+echo "18" > .nvmrc
+nvm use
+npm start
+```
+
+See [Starting the Server](#starting-the-server) section below for details.
+
 ## Angular → Node.js Version Requirements
 
 | Angular Version | Required Node.js Versions |
@@ -133,7 +167,87 @@ nvm use 20.11.0
 nvm alias default 20.11.0
 ```
 
+## Starting the Server
+
+### Option 1: Use Startup Script (Recommended)
+
+The project includes a startup script that automatically handles Node version switching:
+
+```bash
+./start-migration.sh
+```
+
+This script:
+1. Checks your current Node.js version
+2. Switches to Node 18.x/20.x if needed
+3. Installs Node 18 if not available
+4. Starts the migration server
+
+**Benefits:**
+- ✅ Automatic version management
+- ✅ No manual commands needed
+- ✅ Works for all migration scenarios
+
+### Option 2: Manual Switch
+
+Switch Node version before starting the server:
+
+```bash
+# For Angular 14-16
+nvm use 18
+npm start
+
+# For Angular 17-20
+nvm use 20
+npm start
+```
+
+### Option 3: Use .nvmrc (Automatic)
+
+Create an `.nvmrc` file in the project root:
+
+```bash
+echo "18" > .nvmrc
+```
+
+Then NVM automatically uses the correct version:
+
+```bash
+nvm use  # Reads from .nvmrc
+npm start
+```
+
+### Verification
+
+After starting, verify the server is running with the correct Node version:
+
+```bash
+node --version
+# Should show v18.x.x or v20.x.x (not v24.x.x!)
+```
+
 ## Troubleshooting
+
+### "Version mismatch after install"
+
+**Problem**: Agent reports "✅ Successfully installed Node.js 18.20.8" but then shows "❌ Version mismatch after install. Expected 18.20.8, got 24.6.0"
+
+**Cause**: Install succeeded in subprocess, but parent server process is still on Node 24.6.0
+
+**Solution**:
+1. Stop the server (Ctrl+C)
+2. Switch Node version manually:
+   ```bash
+   nvm use 18
+   ```
+3. Restart server:
+   ```bash
+   npm start
+   ```
+4. OR use the startup script:
+   ```bash
+   ./start-migration.sh
+   ```
 
 ### NVM Not Found
 

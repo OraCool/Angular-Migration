@@ -9,7 +9,9 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && npm run copy:scripts && npm run copy:matrix",
+    "copy:scripts": "mkdir -p dist/scripts && cp -r scripts/* dist/scripts/",
+    "copy:matrix": "cp assets/package-compatibility-matrix.json dist/",
     "start": "node dist/index.js",
     "test": "vitest",
     "test:state": "npm run build && node dist/test-state-persistence.js",
@@ -26,6 +28,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
     "@langchain/core": "^1.1.0",
     "@langchain/langgraph": "^1.0.2",
     "@types/node": "^20.0.0",

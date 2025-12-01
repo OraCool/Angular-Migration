@@ -43,6 +43,8 @@ async function testCheckpointSaveLoad() {
 
   const testState: WorkflowState = {
     currentStepIndex: 3,
+    currentActionIndex: 0,
+    completedActions: new Map(),
     completedSteps: ['backup', 'pre-check', 'update-deps'],
     failedSteps: [],
     backupPath: '/test/backup',
@@ -115,6 +117,8 @@ async function testCheckpointList() {
 
     const state: WorkflowState = {
       currentStepIndex: i,
+      currentActionIndex: 0,
+      completedActions: new Map(),
       completedSteps: [],
       failedSteps: [],
       lastValidationResults: new Map(),
@@ -166,6 +170,8 @@ async function testCheckpointDelete() {
 
   const state: WorkflowState = {
     currentStepIndex: 0,
+    currentActionIndex: 0,
+    completedActions: new Map(),
     completedSteps: [],
     failedSteps: [],
     lastValidationResults: new Map(),
@@ -214,6 +220,8 @@ async function testWorkflowEngineRestoration() {
 
   const state: WorkflowState = {
     currentStepIndex: 5,
+    currentActionIndex: 0,
+    completedActions: new Map(),
     completedSteps: ['backup', 'pre-check', 'update-deps', 'update-angular', 'build'],
     failedSteps: ['lint'],
     backupPath: '/test/backup-123',
@@ -309,6 +317,8 @@ async function testAtomicWrite() {
 
   const state: WorkflowState = {
     currentStepIndex: 1,
+    currentActionIndex: 0,
+    completedActions: new Map(),
     completedSteps: ['test'],
     failedSteps: [],
     lastValidationResults: new Map(),

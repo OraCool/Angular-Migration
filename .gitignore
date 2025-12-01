@@ -52,3 +52,4 @@ backup-info.json
 logs
 # LangGraph API
 .langgraph_api
+.claude

@@ -16,6 +16,7 @@ import type {
 import { LLMFixerService } from '../services/llm-fixer.js';
 import { findPatternFix } from '../services/pattern-fixer.js';
 import { config } from '../config.js';
+import { MIGRATION_TOOLS, type ToolContext } from '../acp/tools.js';
 
 /**
  * Resolve workshop script path
@@ -91,6 +92,11 @@ export class WorkflowExecutor {
         case 'auto-fix':
           // Auto-fix action: try pattern-based or LLM fix
           result = await this.runAutoFix(action);
+          break;
+
+        case 'tool':
+          // Tool action: invoke ACP tool
+          result = await this.runTool(action.toolName!, action.toolParams || {});
           break;
 
         default:
@@ -534,6 +540,55 @@ export class WorkflowExecutor {
     }
   }
   
+  /**
+   * Run an ACP tool
+   */
+  private async runTool(
+    toolName: string,
+    params: Record<string, any>
+  ): Promise<ExecutionResult> {
+    const startTime = Date.now();
+
+    try {
+      // Find tool in MIGRATION_TOOLS
+      const tool = MIGRATION_TOOLS.find(t => t.name === toolName);
+      if (!tool) {
+        return {
+          success: false,
+          output: '',
+          error: `Tool not found: ${toolName}`,
+          duration: Date.now() - startTime,
+        };
+      }
+
+      // Build tool context from workflow context
+      const toolContext: ToolContext = {
+        projectPath: this.context.projectPath,
+        workshopRoot: config.workshopRoot,
+        currentVersion: this.context.currentVersion,
+        targetVersion: this.context.targetVersion,
+      };
+
+      // Execute tool handler
+      const result = await tool.handler(params, toolContext);
+
+      // Convert tool result to execution result
+      return {
+        success: result.success !== false,
+        output: result.output || JSON.stringify(result),
+        error: result.error,
+        duration: Date.now() - startTime,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        output: '',
+        error: error instanceof Error ? error.message : String(error),
+        duration: Date.now() - startTime,
+      };
+    }
+  }
+
   /**
    * Get last validation error from engine state
    */

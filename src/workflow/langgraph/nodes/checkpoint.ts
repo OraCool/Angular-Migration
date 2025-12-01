@@ -26,7 +26,9 @@ export async function checkpointNode(
     // Note: We need to convert Map structures to serializable format
     const checkpointState = {
       currentStepIndex: state.currentStepIndex,
+      currentActionIndex: 0, // Default to 0 for langgraph nodes
       completedSteps: state.completedSteps,
+      completedActions: new Map(), // Empty for now, would be populated from tracking
       failedSteps: state.failedSteps,
       backupPath: state.backupPath || undefined,
       pendingConfirmation: state.pendingConfirmation || undefined,

@@ -1,11 +1,10 @@
 /**
- * LLM-based Fix Service
- * Hybrid approach: Pattern-based fixes first, LLM fallback for unknown errors
+ * LLM-based Fix Service with ACP Integration
+ * Hybrid approach: Pattern-based fixes first, ACP+OpenAI fallback for unknown errors
  */
 
-import OpenAI from 'openai';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { ACPAdapter } from '../acp/adapter.js';
+import type { ToolContext } from '../acp/tools.js';
 import { PATTERN_FIXES, type PatternFix } from './pattern-fixer.js';
 
 export interface FixContext {
@@ -15,6 +14,9 @@ export interface FixContext {
   fileContent?: string;
   angularVersion?: string;
   workshopRoot: string;
+  projectPath?: string;
+  currentVersion?: string;
+  targetVersion?: string;
 }
 
 export interface FixResult {
@@ -35,24 +37,27 @@ export interface ExecutorCallbacks {
 }
 
 export class LLMFixerService {
-  private openai?: OpenAI;
+  private acpAdapter?: ACPAdapter;
   private workshopRoot: string;
   private enableLLM: boolean;
   private callbacks?: ExecutorCallbacks;
-  
+
   constructor(workshopRoot: string, enableLLM = true, callbacks?: ExecutorCallbacks) {
     this.workshopRoot = workshopRoot;
     this.enableLLM = enableLLM;
     this.callbacks = callbacks;
-    
-    // Initialize OpenAI if API key is available
+
+    // Initialize ACP Adapter if API key is available
     if (enableLLM && process.env.OPENAI_API_KEY) {
       try {
-        this.openai = new OpenAI({
+        this.acpAdapter = new ACPAdapter({
           apiKey: process.env.OPENAI_API_KEY,
+          model: 'gpt-4o',
+          temperature: 0.2,
         });
+        process.stderr.write('[LLM] ACP Adapter initialized with OpenAI\n');
       } catch (error) {
-        console.warn('OpenAI initialization failed, using pattern-based fixes only:', error);
+        console.warn('ACP Adapter initialization failed, using pattern-based fixes only:', error);
         this.enableLLM = false;
       }
     } else if (enableLLM) {
@@ -60,19 +65,19 @@ export class LLMFixerService {
       this.enableLLM = false;
     }
   }
-  
+
   /**
-   * Try pattern-based fix first, fallback to LLM if needed
+   * Try pattern-based fix first, fallback to ACP+LLM if needed
    */
   async fixError(context: FixContext): Promise<FixResult> {
-    // 1. Try pattern-based fixes first
+    // 1. Try pattern-based fixes first (fast, $0 cost)
     for (const pattern of PATTERN_FIXES) {
       if (pattern.detect(context.error)) {
         process.stderr.write(`[LLM] Pattern match found: '${pattern.name}' - ${pattern.description} (no LLM needed, $0 cost)\n`);
-        
-        const projectRoot = context.workshopRoot.replace('/workshop', '/current_app');
+
+        const projectRoot = context.projectPath || context.workshopRoot.replace('/workshop', '/current_app');
         const commands = await pattern.fix(projectRoot, context.error);
-        
+
         return {
           success: true,
           commands,
@@ -81,13 +86,13 @@ export class LLMFixerService {
         };
       }
     }
-    
-    // 2. Fallback to LLM if enabled
-    if (this.enableLLM && this.openai) {
-      process.stderr.write(`[LLM] No pattern match found. Falling back to LLM for intelligent fix...\n`);
-      return await this.llmFix(context);
+
+    // 2. Fallback to ACP+LLM if enabled (intelligent tool invocation)
+    if (this.enableLLM && this.acpAdapter) {
+      process.stderr.write(`[ACP] No pattern match found. Using ACP+OpenAI with tool invocation...\n`);
+      return await this.acpFix(context);
     }
-    
+
     // 3. No fix available
     process.stderr.write(`[LLM] No fix available (LLM disabled or not initialized)\n`);
     return {
@@ -98,203 +103,125 @@ export class LLMFixerService {
   }
   
   /**
-   * Use OpenAI to generate fix
+   * Use ACP Adapter with OpenAI for intelligent fixing
    */
-  private async llmFix(context: FixContext): Promise<FixResult> {
+  private async acpFix(context: FixContext): Promise<FixResult> {
     try {
-      // Load BuildFixer prompt template
-      const agentPrompt = await this.loadAgentPrompt(context.errorType);
-      
-      // Build prompt
-      const prompt = this.buildFixPrompt(context, agentPrompt);
-      
       if (this.callbacks?.sendThought) {
-        await this.callbacks.sendThought('📝 Sending error context to LLM...');
+        await this.callbacks.sendThought('🤖 Using ACP+OpenAI with tool invocation...');
       }
-      
-      // Log LLM request details
-      const requestTime = new Date().toISOString();
-      const systemTokens = agentPrompt.length / 4; // Rough estimate: 1 token ≈ 4 chars
-      const userTokens = prompt.length / 4;
-      const estimatedInputTokens = Math.ceil(systemTokens + userTokens);
-      
-      process.stderr.write(`[LLM] Request initiated at ${requestTime}\n`);
-      process.stderr.write(`[LLM] Model: gpt-4o, Temperature: 0.2, Format: json_object\n`);
-      process.stderr.write(`[LLM] Estimated input tokens: ~${estimatedInputTokens}\n`);
-      process.stderr.write(`[LLM] Error type: ${context.errorType}\n`);
-      process.stderr.write(`[LLM] Error snippet: ${context.error.substring(0, 100)}...\n`);
-      
-      // Call OpenAI
+
+      const projectPath = context.projectPath || context.workshopRoot.replace('/workshop', '/current_app');
+
+      // Build tool context
+      const toolContext: ToolContext = {
+        projectPath,
+        workshopRoot: this.workshopRoot,
+        currentVersion: context.currentVersion || context.angularVersion || '14',
+        targetVersion: context.targetVersion || '20',
+      };
+
+      // Build fix prompt
+      const prompt = this.buildACPPrompt(context);
+
+      process.stderr.write(`[ACP] Invoking ACP agent...\n`);
+      process.stderr.write(`[ACP] Error type: ${context.errorType}\n`);
+      process.stderr.write(`[ACP] Error snippet: ${context.error.substring(0, 100)}...\n`);
+
+      // Invoke ACP adapter
       const startTime = Date.now();
-      const response = await this.openai!.chat.completions.create({
-        model: 'gpt-4o', // GPT-4o for better code fixes
-        messages: [
-          { role: 'system', content: agentPrompt },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2, // Low temperature for deterministic fixes
-        response_format: { type: 'json_object' }, // Request JSON response
-      });
+      const response = await this.acpAdapter!.invoke(prompt, toolContext);
       const duration = Date.now() - startTime;
-      
-      // Parse response
-      const content = response.choices[0]?.message?.content || '{}';
-      const parsed = JSON.parse(content);
-      
-      // Log LLM response details
-      const usage = response.usage;
-      const inputTokens = usage?.prompt_tokens || 0;
-      const outputTokens = usage?.completion_tokens || 0;
-      const totalTokens = usage?.total_tokens || 0;
-      
-      // GPT-4o pricing (as of Nov 2024): $2.50/1M input, $10.00/1M output
-      const inputCost = (inputTokens / 1000000) * 2.50;
-      const outputCost = (outputTokens / 1000000) * 10.00;
-      const totalCost = inputCost + outputCost;
-      
-      process.stderr.write(`[LLM] Response received in ${duration}ms\n`);
-      process.stderr.write(`[LLM] Token usage: ${inputTokens} input + ${outputTokens} output = ${totalTokens} total\n`);
-      process.stderr.write(`[LLM] Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(4)} input + $${outputCost.toFixed(4)} output)\n`);
-      process.stderr.write(`[LLM] Finish reason: ${response.choices[0]?.finish_reason || 'unknown'}\n`);
-      process.stderr.write(`[LLM] Commands generated: ${parsed.commands?.length || 0}\n`);
-      process.stderr.write(`[LLM] File changes: ${parsed.fileChanges?.length || 0}\n`);
-      
-      if (parsed.reasoning) {
-        process.stderr.write(`[LLM] Reasoning: ${parsed.reasoning.substring(0, 200)}...\n`);
+
+      process.stderr.write(`[ACP] Response received in ${duration}ms\n`);
+
+      if (!response.success) {
+        process.stderr.write(`[ACP] Fix failed: ${response.error}\n`);
+        return {
+          success: false,
+          explanation: `ACP fix failed: ${response.error}`,
+          usedLLM: true,
+        };
       }
-      
-      // Show LLM reasoning
-      if (this.callbacks?.sendThought) {
-        await this.callbacks.sendThought(`💡 LLM Analysis:\n${parsed.reasoning || parsed.explanation || 'Fix generated'}`);
+
+      // Log tool invocations
+      if (response.toolCalls && response.toolCalls.length > 0) {
+        process.stderr.write(`[ACP] AI invoked ${response.toolCalls.length} tools:\n`);
+        for (const toolCall of response.toolCalls) {
+          process.stderr.write(`[ACP]   - ${toolCall.name}\n`);
+        }
       }
-      
-      if (this.callbacks?.sendMessage && parsed.commands) {
-        await this.callbacks.sendMessage(`✅ LLM Fix Strategy: ${parsed.explanation}\nCommands: ${parsed.commands.length}\nCost: $${totalCost.toFixed(4)}`);
+
+      // Show reasoning
+      if (this.callbacks?.sendThought && response.reasoning) {
+        await this.callbacks.sendThought(`💡 ACP Analysis:\n${response.reasoning}`);
       }
-      
+
+      if (this.callbacks?.sendMessage) {
+        const toolCount = response.toolCalls?.length || 0;
+        await this.callbacks.sendMessage(`✅ ACP Fix Applied: ${toolCount} tools invoked`);
+      }
+
       return {
         success: true,
-        solution: parsed.explanation || 'LLM fix applied',
-        commands: parsed.commands || [],
-        fileChanges: parsed.fileChanges || [],
-        explanation: parsed.explanation || 'Fix generated by LLM',
+        solution: response.content || 'Fix applied via ACP',
+        explanation: response.reasoning || 'Fix applied successfully',
         usedLLM: true,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorStack = error instanceof Error ? error.stack : '';
-      
-      process.stderr.write(`[LLM] ERROR: LLM fix failed\n`);
-      process.stderr.write(`[LLM] Error message: ${errorMessage}\n`);
+
+      process.stderr.write(`[ACP] ERROR: ACP fix failed\n`);
+      process.stderr.write(`[ACP] Error message: ${errorMessage}\n`);
       if (errorStack) {
-        process.stderr.write(`[LLM] Stack trace: ${errorStack.substring(0, 500)}...\n`);
+        process.stderr.write(`[ACP] Stack trace: ${errorStack.substring(0, 500)}...\n`);
       }
-      
-      console.error('LLM fix failed:', error);
+
+      console.error('ACP fix failed:', error);
       return {
         success: false,
-        explanation: `LLM fix failed: ${errorMessage}`,
+        explanation: `ACP fix failed: ${errorMessage}`,
         usedLLM: true,
       };
     }
   }
-  
+
   /**
-   * Load agent prompt template from workshop
+   * Build ACP prompt with error context
    */
-  private async loadAgentPrompt(errorType: string): Promise<string> {
-    const agentMap: Record<string, string> = {
-      'Build Errors': 'build_fixer.md',
-      'Material Issues': 'style_migrator.md',
-      'Component Issues': 'code_modernizer.md',
-      'HTTP/Services': 'logic_refactorer.md',
-      'Dependencies': 'dependency_auditor.md',
-    };
-    
-    const agentFile = agentMap[errorType] || 'build_fixer.md';
-    const agentPath = path.join(this.workshopRoot, 'agents/roles', agentFile);
-    
-    try {
-      const content = await fs.readFile(agentPath, 'utf-8');
-      
-      // Extract relevant sections
-      const roleMatch = content.match(/## Role Description\n([\s\S]*?)(?=\n##)/);
-      const responsibilitiesMatch = content.match(/## Responsibilities\n([\s\S]*?)(?=\n##)/);
-      
-      return `
-# ${errorType} Agent
+  private buildACPPrompt(context: FixContext): string {
+    let prompt = `I need help fixing an Angular migration error.
 
-${roleMatch ? roleMatch[1] : ''}
+**Error Type:** ${context.errorType}
 
-${responsibilitiesMatch ? responsibilitiesMatch[1] : ''}
-
-Your task is to provide a fix for the error below. Return only the fix commands or code changes needed.
-      `.trim();
-    } catch (error) {
-      return `You are an Angular migration expert. Fix the error below.`;
-    }
-  }
-  
-  /**
-   * Build fix prompt with context
-   */
-  private buildFixPrompt(context: FixContext, agentPrompt: string): string {
-    let prompt = `
-Angular Version: ${context.angularVersion || 'Unknown'}
-
-Error:
+**Error Message:**
 \`\`\`
 ${context.error}
 \`\`\`
 `;
-    
+
     if (context.filePath && context.fileContent) {
       prompt += `
-File: ${context.filePath}
+**Affected File:** ${context.filePath}
 \`\`\`typescript
-${context.fileContent}
+${context.fileContent.substring(0, 1000)}${context.fileContent.length > 1000 ? '...' : ''}
 \`\`\`
 `;
     }
-    
-    prompt += `
-Provide the fix as:
-1. Commands to run (if any)
-2. File changes (if any)
-3. Brief explanation
 
-Format your response as JSON:
-\`\`\`json
-{
-  "commands": ["command1", "command2"],
-  "fileChanges": [
-    {"filePath": "path/to/file", "content": "new content"}
-  ],
-  "explanation": "Why this fix works"
-}
-\`\`\`
-`;
-    
+    prompt += `
+**Current Angular Version:** ${context.angularVersion || context.currentVersion || 'Unknown'}
+
+Please analyze this error and fix it using the available tools:
+1. Use read_file to examine relevant files if needed
+2. Use fix_breaking_changes if this is a known breaking change
+3. Use update_packages if package versions need updating
+4. Use write_file to apply code fixes
+5. Use run_migration_command to run any necessary commands
+
+Explain what you're doing and why.`;
+
     return prompt;
-  }
-  
-  /**
-   * Apply fix result to the project
-   */
-  async applyFix(result: FixResult, projectRoot: string): Promise<void> {
-    if (!result.success) {
-      throw new Error('Cannot apply unsuccessful fix');
-    }
-    
-    // Apply file changes
-    if (result.fileChanges) {
-      for (const change of result.fileChanges) {
-        const fullPath = path.join(projectRoot, change.filePath);
-        await fs.mkdir(path.dirname(fullPath), { recursive: true });
-        await fs.writeFile(fullPath, change.content, 'utf-8');
-      }
-    }
-    
-    // Commands will be executed by the workflow executor
   }
 }
