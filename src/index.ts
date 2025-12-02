@@ -256,6 +256,7 @@ class AngularMigrationAgent implements Agent {
   ): Promise<void> {
     if (!session.awaitingConfirmation) return;
 
+    // Declare confirmationType once at the top
     const confirmationType = session.awaitingConfirmation.type;
 
     // Special handling for resume-choice: accepts "resume" or "fresh"
@@ -313,7 +314,7 @@ class AngularMigrationAgent implements Agent {
       return;
     }
 
-    const confirmationType = session.awaitingConfirmation.type;
+    // Clear the confirmation state (confirmationType already declared above)
     session.awaitingConfirmation = undefined;
 
     if (confirmationType === "workflow-step") {
