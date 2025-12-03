@@ -10,11 +10,12 @@ import {
   WorkflowEngine,
   WorkflowContext,
   ANGULAR_MIGRATION_WORKFLOW,
-} from './engine.js';
+  StateManager,
+  switchNodeVersion,
+} from '@angular-migration/workflow-engine';
 import { WorkflowExecutor } from './executor.js';
 import { generateEnhancedErrorMessage, getRecommendedScripts } from './issue-mapper.js';
-import { validateNodeVersion, switchNodeVersion, installNodeVersion } from '../utils/node-version-checker.js';
-import { StateManager } from './state-manager.js';
+import { validateNodeVersion, installNodeVersion } from '../utils/node-version-checker.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 

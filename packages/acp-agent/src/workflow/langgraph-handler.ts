@@ -6,11 +6,10 @@
  */
 
 import type { SessionId, SessionNotification, TextContent } from '../types/acp.js';
-import type { WorkflowContext } from './engine.js';
-import { ANGULAR_MIGRATION_WORKFLOW } from './engine.js';
+import type { WorkflowContext } from '@angular-migration/workflow-engine';
+import { ANGULAR_MIGRATION_WORKFLOW, StateManager } from '@angular-migration/workflow-engine';
 import { streamMigrationWorkflow } from './langgraph/graph.js';
 import { StateHelpers, type MigrationState } from './langgraph/state.js';
-import { StateManager } from './state-manager.js';
 
 /**
  * Minimal transport interface for sending messages to Zed

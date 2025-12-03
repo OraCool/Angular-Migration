@@ -6,7 +6,7 @@
 
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { MigrationStateAnnotation, type MigrationState } from './state.js';
-import type { WorkflowStep } from '../engine.js';
+import type { WorkflowStep } from '@angular-migration/workflow-engine';
 
 // Import nodes
 import { entryNode } from './nodes/entry.js';

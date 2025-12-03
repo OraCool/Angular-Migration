@@ -9,7 +9,7 @@
 
 import type { MigrationState } from '../state.js';
 import { WorkflowExecutor } from '../../executor.js';
-import { WorkflowEngine, type WorkflowStep, type WorkflowContext } from '../../engine.js';
+import { WorkflowEngine, type WorkflowStep, type WorkflowContext } from '@angular-migration/workflow-engine';
 import type { SessionId } from '../../../types/acp.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

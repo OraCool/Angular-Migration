@@ -9,7 +9,7 @@
 
 import { buildMigrationGraph, executeMigrationWorkflow, streamMigrationWorkflow } from './graph.js';
 import { StateHelpers, type MigrationState } from './state.js';
-import { ANGULAR_MIGRATION_WORKFLOW } from '../engine.js';
+import { ANGULAR_MIGRATION_WORKFLOW } from '@angular-migration/workflow-engine';
 import type { SessionId } from '../../types/acp.js';
 
 /**

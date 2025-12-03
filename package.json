@@ -1,51 +1,28 @@
 {
-  "name": "angular-migration-acp-agent",
+  "name": "angular-migration-workspace",
   "version": "1.0.0",
-  "description": "ACP-based agent for Angular 14 to 20 migration (Zed IDE compatible)",
-  "main": "dist/index.js",
-  "type": "module",
-  "bin": {
-    "angular-migration-agent": "./dist/index.js",
-    "thread-manager": "./dist/cli/thread-manager.js"
-  },
+  "private": true,
+  "description": "Monorepo for Angular migration tools (ACP agent and MCP server)",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc && npm run copy:scripts && npm run copy:matrix",
-    "copy:scripts": "mkdir -p dist/scripts && cp -r scripts/* dist/scripts/",
-    "copy:matrix": "cp assets/package-compatibility-matrix.json dist/",
-    "start": "node dist/index.js",
-    "test": "vitest",
-    "test:state": "npm run build && node dist/test-state-persistence.js",
-    "test:langgraph": "npm run build && node dist/workflow/langgraph/test-graph.js"
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "dev:acp": "npm run dev --workspace=packages/acp-agent",
+    "dev:mcp": "npm run dev --workspace=packages/mcp-server",
+    "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules"
   },
   "keywords": [
-    "acp",
     "angular",
     "migration",
-    "agent",
-    "zed",
-    "ai"
+    "monorepo",
+    "acp",
+    "mcp"
   ],
   "author": "",
   "license": "MIT",
-  "dependencies": {
-    "@agentclientprotocol/sdk": "^0.7.0",
-    "@anthropic-ai/sdk": "^0.71.0",
-    "@langchain/core": "^1.1.0",
-    "@langchain/langgraph": "^1.0.2",
-    "@types/node": "^20.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
-    "@typescript-eslint/typescript-estree": "^7.0.0",
-    "glob": "^10.3.10",
-    "openai": "^6.9.1",
-    "ts-morph": "^21.0.0",
-    "typescript": "^5.3.3",
-    "uuid": "^13.0.0",
-    "zod": "^3.22.4"
-  },
   "devDependencies": {
-    "@types/uuid": "^10.0.0",
-    "tsx": "^4.7.0",
-    "vitest": "^1.2.0"
+    "typescript": "^5.3.3"
   }
 }

@@ -1,0 +1,37 @@
+{
+  "name": "@angular-migration/workflow-engine",
+  "version": "1.0.0",
+  "description": "Shared workflow engine for Angular migration (used by ACP and MCP servers)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./engine": "./dist/engine/index.js",
+    "./tools": "./dist/tools/index.js",
+    "./utils": "./dist/utils/index.js"
+  },
+  "scripts": {
+    "build": "tsc && npm run copy:assets",
+    "copy:assets": "mkdir -p dist/scripts dist/assets && cp -r src/scripts/* dist/scripts/ 2>/dev/null || true && cp assets/* dist/assets/ 2>/dev/null || true",
+    "clean": "rm -rf dist",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "angular",
+    "migration",
+    "workflow",
+    "engine"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "zod": "^3.22.4",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.3.3"
+  }
+}

@@ -10,7 +10,7 @@
 
 import type { MigrationState, StepExecutionData } from '../state.js';
 import { WorkflowExecutor } from '../../executor.js';
-import { WorkflowEngine, type WorkflowStep, type WorkflowContext, type WorkflowAction } from '../../engine.js';
+import { WorkflowEngine, type WorkflowStep, type WorkflowContext, type WorkflowAction } from '@angular-migration/workflow-engine';
 import type { SessionId } from '../../../types/acp.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';

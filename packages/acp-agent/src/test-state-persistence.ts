@@ -8,9 +8,12 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { StateManager } from './workflow/state-manager.js';
-import { WorkflowEngine } from './workflow/engine.js';
-import type { WorkflowContext, WorkflowState } from './workflow/engine.js';
+import {
+  StateManager,
+  WorkflowEngine,
+  type WorkflowContext,
+  type WorkflowState,
+} from '@angular-migration/workflow-engine';
 
 // Test configuration
 const TEST_CHECKPOINT_DIR = path.join(os.tmpdir(), 'angular-migration-test-checkpoints');

@@ -12,7 +12,7 @@ import type {
   ValidationResult,
   WorkflowContext,
   RetryConfig,
-} from './engine.js';
+} from '@angular-migration/workflow-engine';
 import { LLMFixerService } from '../services/llm-fixer.js';
 import { findPatternFix } from '../services/pattern-fixer.js';
 import { config } from '../config.js';
