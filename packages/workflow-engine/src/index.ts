@@ -30,9 +30,51 @@ export type {
   CheckpointMetadata,
 } from './engine/state-manager.js';
 
-export type { SessionId, Plan, PlanEntry, WorkflowEngineConfig } from './types/index.js';
+export type {
+  SessionId,
+  Plan,
+  PlanEntry,
+  WorkflowEngineConfig,
+  StageExecutionOptions,
+  StageExecutionResult,
+  StepExecutionResult,
+  StageProgress,
+} from './types/index.js';
 
-// Utils - export all node version functions
+// Stage definitions and utilities
+export {
+  ANGULAR_MIGRATION_STAGES,
+  OPTIONAL_FEATURE_MIGRATIONS,
+  ALL_MIGRATION_STAGES,
+  getStageById,
+  getStageByStepIndex,
+  getDependentStages,
+  areDependenciesMet,
+  getNextRecommendedStage,
+  getAvailableOptionalStages,
+} from './engine/workflow-stages.js';
+
+export type { StageDefinition } from './engine/workflow-stages.js';
+
+// Cross-platform utilities
+export {
+  getPlatform,
+  getShellCommand,
+  escapeForShell,
+} from './utils/platform.js';
+
+export type { Platform } from './utils/platform.js';
+
+// Node.js version validation utilities
+export {
+  validateNodeVersion,
+  getNodeVersionError,
+  getInstallInstructions,
+} from './utils/node-version-validator.js';
+
+export type { NodeVersionValidation } from './utils/node-version-validator.js';
+
+// Legacy node version utilities (for backward compatibility with acp-agent)
 export {
   parseNodeRequirements,
   compareVersions,

@@ -11,6 +11,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { SessionManager } from '../session/manager.js';
 import { ANGULAR_MIGRATION_WORKFLOW } from '@angular-migration/workflow-engine';
+import { BREAKING_CHANGES_DB } from '../tools/packages.js';
 
 /**
  * All available MCP resources
@@ -36,6 +37,50 @@ function getResources(sessionManager: SessionManager): Resource[] {
       uri: 'migration://docs/compatibility',
       name: 'Package Compatibility',
       description: 'Package compatibility matrix for Angular versions',
+      mimeType: 'application/json',
+    },
+
+    // Breaking changes resources
+    {
+      uri: 'migration://breaking-changes/overview',
+      name: 'Breaking Changes Overview',
+      description: 'Overview of all breaking changes across Angular versions 15-20',
+      mimeType: 'application/json',
+    },
+    {
+      uri: 'migration://breaking-changes/15',
+      name: 'Angular 15 Breaking Changes',
+      description: 'Breaking changes introduced in Angular 15',
+      mimeType: 'application/json',
+    },
+    {
+      uri: 'migration://breaking-changes/16',
+      name: 'Angular 16 Breaking Changes',
+      description: 'Breaking changes introduced in Angular 16',
+      mimeType: 'application/json',
+    },
+    {
+      uri: 'migration://breaking-changes/17',
+      name: 'Angular 17 Breaking Changes',
+      description: 'Breaking changes introduced in Angular 17',
+      mimeType: 'application/json',
+    },
+    {
+      uri: 'migration://breaking-changes/18',
+      name: 'Angular 18 Breaking Changes',
+      description: 'Breaking changes introduced in Angular 18',
+      mimeType: 'application/json',
+    },
+    {
+      uri: 'migration://breaking-changes/19',
+      name: 'Angular 19 Breaking Changes',
+      description: 'Breaking changes introduced in Angular 19',
+      mimeType: 'application/json',
+    },
+    {
+      uri: 'migration://breaking-changes/20',
+      name: 'Angular 20 Breaking Changes',
+      description: 'Breaking changes introduced in Angular 20',
       mimeType: 'application/json',
     },
   ];
@@ -85,6 +130,11 @@ export function registerResources(
         content = JSON.stringify(getWorkflowDoc(), null, 2);
       } else if (uri === 'migration://docs/compatibility') {
         content = JSON.stringify(getCompatibilityDoc(), null, 2);
+      } else if (uri === 'migration://breaking-changes/overview') {
+        content = JSON.stringify(getBreakingChangesOverview(), null, 2);
+      } else if (uri.startsWith('migration://breaking-changes/')) {
+        const version = uri.replace('migration://breaking-changes/', '');
+        content = JSON.stringify(getBreakingChangesForVersion(version), null, 2);
       } else if (uri.startsWith('migration://sessions/')) {
         const match = uri.match(/migration:\/\/sessions\/([^/]+)\/(state|plan)/);
         if (!match) {
@@ -234,6 +284,8 @@ This MCP server provides an automated, step-by-step workflow for migrating Angul
 - \`migration://docs/overview\` - This document
 - \`migration://docs/workflow\` - Complete workflow steps
 - \`migration://docs/compatibility\` - Package compatibility matrix
+- \`migration://breaking-changes/overview\` - Breaking changes overview
+- \`migration://breaking-changes/{version}\` - Breaking changes for specific version (15-20)
 - \`migration://sessions/{id}/state\` - Session state
 - \`migration://sessions/{id}/plan\` - Session plan with progress
 
@@ -321,5 +373,66 @@ function getCompatibilityDoc() {
         'Node.js': '22.x',
       },
     },
+  };
+}
+
+/**
+ * Generate breaking changes overview
+ */
+function getBreakingChangesOverview() {
+  const versions = Object.keys(BREAKING_CHANGES_DB).sort();
+  const overview = {
+    description: 'Breaking changes across Angular versions 15-20',
+    versions: versions,
+    summary: {} as Record<string, { packages: number; totalChanges: number }>,
+  };
+
+  // Calculate summary for each version
+  for (const version of versions) {
+    const versionChanges = BREAKING_CHANGES_DB[version];
+    const packages = Object.keys(versionChanges);
+    let totalChanges = 0;
+
+    for (const pkg of packages) {
+      totalChanges += versionChanges[pkg].length;
+    }
+
+    overview.summary[version] = {
+      packages: packages.length,
+      totalChanges,
+    };
+  }
+
+  return overview;
+}
+
+/**
+ * Generate breaking changes for a specific version
+ */
+function getBreakingChangesForVersion(version: string) {
+  const versionChanges = BREAKING_CHANGES_DB[version];
+
+  if (!versionChanges) {
+    throw new Error(`No breaking changes data for Angular ${version}`);
+  }
+
+  const packages = Object.keys(versionChanges);
+  let totalChanges = 0;
+
+  for (const pkg of packages) {
+    totalChanges += versionChanges[pkg].length;
+  }
+
+  return {
+    version,
+    packages: packages.length,
+    totalChanges,
+    changes: versionChanges,
+    notes: [
+      `Angular ${version} introduced ${totalChanges} breaking changes across ${packages.length} packages`,
+      'Review each change carefully before upgrading',
+      'Test thoroughly after applying updates',
+      `Visit https://update.angular.io for interactive migration guide`,
+    ],
   };
 }

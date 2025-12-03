@@ -1,6 +1,6 @@
 /**
  * MCP Tools Registration
- * Registers all 15 migration workflow tools
+ * Registers migration workflow tools (transitioning to stage-based architecture)
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -14,119 +14,200 @@ import { SessionManager } from '../session/manager.js';
 import { ToolResult } from '../types.js';
 
 // Import tool handlers
-import * as workflowTools from './workflow.js';
+import * as migrationStageTools from './migration-stages.js';
 import * as stateTools from './state.js';
 import * as validationTools from './validation.js';
 import * as packageTools from './packages.js';
 
 /**
  * All available MCP tools
+ * Stage-based architecture with 12 migration stage tools + 10 supporting tools
  */
 const TOOLS: Tool[] = [
-  // Workflow Management (6 tools)
+  // ========================================
+  // CORE MIGRATION STAGE TOOLS (7 tools)
+  // ========================================
   {
-    name: 'workflow_start',
-    description: 'Start a new migration workflow session',
+    name: 'migration_stage_pre_migration',
+    description: 'Execute pre-migration stage: backup, validation, git commit (Steps 0-2)',
     inputSchema: {
       type: 'object',
       properties: {
-        projectPath: {
-          type: 'string',
-          description: 'Absolute path to the Angular project',
-        },
-        currentVersion: {
-          type: 'string',
-          description: 'Current Angular version (optional, will auto-detect)',
-        },
-        targetVersion: {
-          type: 'string',
-          description: 'Target Angular version (default: "20")',
-        },
-        skipTests: {
-          type: 'boolean',
-          description: 'Skip running tests during migration',
-        },
-        skipLint: {
-          type: 'boolean',
-          description: 'Skip running linter during migration',
-        },
-        autoConfirm: {
-          type: 'boolean',
-          description: 'Auto-confirm all prompts (dangerous)',
-        },
-      },
-      required: ['projectPath'],
-    },
-  },
-  {
-    name: 'workflow_step_next',
-    description: 'Execute the next step in the migration workflow',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID from workflow_start',
-        },
+        sessionId: { type: 'string', description: 'Session ID' },
+        skipBackup: { type: 'boolean', description: 'Skip backup (not recommended)' },
+        skipValidations: { type: 'boolean', description: 'Skip validations' },
+        autoConfirm: { type: 'boolean', description: 'Auto-confirm prompts' },
       },
       required: ['sessionId'],
     },
   },
   {
-    name: 'workflow_step_skip',
-    description: 'Skip the current workflow step',
+    name: 'migration_stage_v15',
+    description: 'Execute Angular 15 upgrade: update to v15 (Steps 3-4, requires 1 confirmation). Standalone migration is now a separate optional tool.',
     inputSchema: {
       type: 'object',
       properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID',
-        },
-        reason: {
-          type: 'string',
-          description: 'Reason for skipping (optional)',
-        },
+        sessionId: { type: 'string', description: 'Session ID' },
+        skipValidations: { type: 'boolean', description: 'Skip validations' },
+        autoConfirm: { type: 'boolean', description: 'Auto-confirm prompts' },
+        continueOnError: { type: 'boolean', description: 'Continue even if steps fail' },
       },
       required: ['sessionId'],
     },
   },
   {
-    name: 'workflow_get_plan',
-    description: 'Get the full migration plan with all steps',
+    name: 'migration_stage_v16',
+    description: 'Execute Angular 16 upgrade: update to v16 with Signals support (Steps 7-8, requires 1 confirmation)',
     inputSchema: {
       type: 'object',
       properties: {
-        targetVersion: {
-          type: 'string',
-          description: 'Target Angular version (default: "20")',
-        },
+        sessionId: { type: 'string', description: 'Session ID' },
+        skipValidations: { type: 'boolean', description: 'Skip validations' },
+        autoConfirm: { type: 'boolean', description: 'Auto-confirm prompts' },
+        continueOnError: { type: 'boolean', description: 'Continue even if steps fail' },
+      },
+      required: ['sessionId'],
+    },
+  },
+  {
+    name: 'migration_stage_v17',
+    description: 'Execute Angular 17 upgrade: update to v17 with built-in control flow migration (Steps 9-11, requires 1 confirmation)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID' },
+        skipValidations: { type: 'boolean', description: 'Skip validations' },
+        autoConfirm: { type: 'boolean', description: 'Auto-confirm prompts' },
+        continueOnError: { type: 'boolean', description: 'Continue even if steps fail' },
+      },
+      required: ['sessionId'],
+    },
+  },
+  {
+    name: 'migration_stage_v18',
+    description: 'Execute Angular 18 upgrade: update to v18 (Steps 12-13, requires 1 confirmation)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID' },
+        skipValidations: { type: 'boolean', description: 'Skip validations' },
+        autoConfirm: { type: 'boolean', description: 'Auto-confirm prompts' },
+        continueOnError: { type: 'boolean', description: 'Continue even if steps fail' },
+      },
+      required: ['sessionId'],
+    },
+  },
+  {
+    name: 'migration_stage_v19',
+    description: 'Execute Angular 19 upgrade: update to v19 (Steps 14-15, requires 1 confirmation)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID' },
+        skipValidations: { type: 'boolean', description: 'Skip validations' },
+        autoConfirm: { type: 'boolean', description: 'Auto-confirm prompts' },
+        continueOnError: { type: 'boolean', description: 'Continue even if steps fail' },
+      },
+      required: ['sessionId'],
+    },
+  },
+  {
+    name: 'migration_stage_v20',
+    description: 'Execute Angular 20 upgrade: update to v20 (Steps 16-17, requires 1 confirmation)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID' },
+        skipValidations: { type: 'boolean', description: 'Skip validations' },
+        autoConfirm: { type: 'boolean', description: 'Auto-confirm prompts' },
+        continueOnError: { type: 'boolean', description: 'Continue even if steps fail' },
+      },
+      required: ['sessionId'],
+    },
+  },
+  {
+    name: 'migration_stage_post_migration',
+    description: 'Execute post-migration stage: generate final migration report (Step 18)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID' },
+        autoConfirm: { type: 'boolean', description: 'Auto-confirm prompts' },
+      },
+      required: ['sessionId'],
+    },
+  },
+
+  // ========================================
+  // OPTIONAL FEATURE MIGRATION TOOL (1 tool)
+  // ========================================
+  {
+    name: 'migration_feature_standalone',
+    description: 'Execute optional standalone components migration: convert NgModule-based components to standalone (Steps 5-6, requires 1 confirmation). Can run anytime after v15+, recommended before v17.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID' },
+        skipValidations: { type: 'boolean', description: 'Skip validations' },
+        autoConfirm: { type: 'boolean', description: 'Auto-confirm prompts' },
+        continueOnError: { type: 'boolean', description: 'Continue even if steps fail' },
+      },
+      required: ['sessionId'],
+    },
+  },
+
+  // ========================================
+  // STAGE MANAGEMENT TOOLS (4 tools)
+  // ========================================
+  {
+    name: 'migration_stage_get_current',
+    description: 'Get current stage information with progress and next step recommendation',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID' },
+      },
+      required: ['sessionId'],
+    },
+  },
+  {
+    name: 'migration_stage_skip_to',
+    description: 'Jump to a specific stage by ID (bypasses sequential order validation)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID' },
+        stageId: { type: 'string', description: 'Target stage ID (e.g., "migration_stage_v17")' },
+      },
+      required: ['sessionId', 'stageId'],
+    },
+  },
+  {
+    name: 'migration_stage_get_all',
+    description: 'List all migration stages with status and recommended next action',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID (optional, omit for stage definitions only)' },
       },
       required: [],
     },
   },
   {
-    name: 'workflow_get_status',
-    description: 'Get current workflow status and progress',
+    name: 'migration_stage_validate_node',
+    description: 'Validate Node.js version compatibility (v22 required for Angular 20)',
     inputSchema: {
       type: 'object',
       properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID',
-        },
+        requiredMajor: { type: 'number', description: 'Required Node.js major version (default: 22)' },
       },
-      required: ['sessionId'],
-    },
-  },
-  {
-    name: 'workflow_list_sessions',
-    description: 'List all active workflow sessions',
-    inputSchema: {
-      type: 'object',
-      properties: {},
       required: [],
     },
   },
+
+  // ========================================
+  // SUPPORTING TOOLS
+  // ========================================
 
   // State Management (4 tools)
   {
@@ -234,7 +315,7 @@ const TOOLS: Tool[] = [
     },
   },
 
-  // Package Management (2 tools)
+  // Package Management (3 tools)
   {
     name: 'packages_get_compatibility',
     description: 'Get package compatibility matrix for Angular versions',
@@ -263,6 +344,28 @@ const TOOLS: Tool[] = [
       required: ['projectPath'],
     },
   },
+  {
+    name: 'packages_get_breaking_changes',
+    description: 'Get breaking changes for package version upgrades based on package.json',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectPath: {
+          type: 'string',
+          description: 'Path to Angular project',
+        },
+        fromVersion: {
+          type: 'string',
+          description: 'Current Angular version (e.g., "14")',
+        },
+        toVersion: {
+          type: 'string',
+          description: 'Target Angular version (e.g., "20")',
+        },
+      },
+      required: ['projectPath', 'fromVersion', 'toVersion'],
+    },
+  },
 ];
 
 /**
@@ -284,8 +387,8 @@ export function registerTools(server: Server, sessionManager: SessionManager): v
       // Route to appropriate handler
       const toolArgs = args || {};
 
-      if (name.startsWith('workflow_')) {
-        result = await workflowTools.handleWorkflowTool(name, toolArgs, sessionManager);
+      if (name.startsWith('migration_stage_') || name.startsWith('migration_feature_')) {
+        result = await migrationStageTools.handleMigrationStageTool(name, toolArgs, sessionManager);
       } else if (name.startsWith('state_')) {
         result = await stateTools.handleStateTool(name, toolArgs, sessionManager);
       } else if (name.startsWith('validate_')) {

@@ -5,6 +5,47 @@
 import type { WorkflowStep, WorkflowState } from '@angular-migration/workflow-engine';
 
 /**
+ * Next step recommendation
+ */
+export interface NextStepRecommendation {
+  action: string;
+  description: string;
+  reasoning: string;
+  optional?: Array<{
+    action: string;
+    description: string;
+  }>;
+}
+
+/**
+ * Detailed error information
+ */
+export interface ErrorDetails {
+  stage?: string;
+  step?: string;
+  action?: string;
+  exitCode?: number;
+  stderr?: string;
+  stdout?: string;
+  duration?: number;
+  timestamp?: string;
+  required?: string;
+  current?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Troubleshooting guidance
+ */
+export interface TroubleshootingInfo {
+  likelyCause: string;
+  suggestedFixes: string[];
+  relatedDocs: string[];
+  canRetry: boolean;
+  canRollback: boolean;
+}
+
+/**
  * Tool execution result
  */
 export interface ToolResult {
@@ -12,6 +53,15 @@ export interface ToolResult {
   data?: unknown;
   error?: string;
   message?: string;
+
+  /** Next step recommendation (required for all tools) */
+  nextStep?: NextStepRecommendation;
+
+  /** Detailed error information */
+  details?: ErrorDetails;
+
+  /** Troubleshooting guidance */
+  troubleshooting?: TroubleshootingInfo;
 }
 
 /**

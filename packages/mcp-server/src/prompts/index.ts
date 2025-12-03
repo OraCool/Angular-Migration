@@ -75,6 +75,27 @@ const PROMPTS: Prompt[] = [
       },
     ],
   },
+  {
+    name: 'review-breaking-changes',
+    description: 'Guide for systematically reviewing breaking changes for your migration',
+    arguments: [
+      {
+        name: 'fromVersion',
+        description: 'Current Angular version (e.g., "14")',
+        required: true,
+      },
+      {
+        name: 'toVersion',
+        description: 'Target Angular version (e.g., "20")',
+        required: true,
+      },
+      {
+        name: 'projectPath',
+        description: 'Absolute path to the Angular project',
+        required: true,
+      },
+    ],
+  },
 ];
 
 /**
@@ -108,6 +129,9 @@ export function registerPrompts(
           break;
         case 'explain-step':
           messages = await getExplainStepPrompt(args);
+          break;
+        case 'review-breaking-changes':
+          messages = await getReviewBreakingChangesPrompt(args);
           break;
         default:
           throw new Error(`Unknown prompt: ${name}`);
@@ -287,6 +311,107 @@ Please provide:
 7. **Related Documentation**: Links to official Angular docs
 
 Make it educational and actionable.`,
+      },
+    },
+  ];
+}
+
+/**
+ * Generate breaking changes review prompt
+ */
+async function getReviewBreakingChangesPrompt(
+  args: Record<string, string> | undefined
+): Promise<Array<{ role: 'user' | 'assistant'; content: { type: 'text'; text: string } }>> {
+  const fromVersion = args?.fromVersion;
+  const toVersion = args?.toVersion;
+  const projectPath = args?.projectPath;
+
+  if (!fromVersion || !toVersion || !projectPath) {
+    throw new Error('fromVersion, toVersion, and projectPath arguments are required');
+  }
+
+  return [
+    {
+      role: 'user',
+      content: {
+        type: 'text',
+        text: `Guide me through reviewing breaking changes for migrating my Angular project from version ${fromVersion} to ${toVersion}.
+
+**Project Path**: ${projectPath}
+
+Please follow this systematic approach:
+
+## Step 1: Get Overview
+First, retrieve the breaking changes overview:
+- Use the resource: \`migration://breaking-changes/overview\`
+- This shows the summary across all versions
+
+## Step 2: Get Project-Specific Analysis
+Use the tool \`packages_get_breaking_changes\` with:
+- projectPath: "${projectPath}"
+- fromVersion: "${fromVersion}"
+- toVersion: "${toVersion}"
+
+This will filter breaking changes to only packages used in the project.
+
+## Step 3: Review by Priority
+Organize the breaking changes by priority:
+
+### 🔴 CRITICAL (Must Fix Immediately)
+- Breaking API removals
+- Type system changes
+- Build/compilation errors
+
+### 🟡 IMPORTANT (Fix During Migration)
+- Deprecated API usage
+- Behavioral changes
+- Performance impacts
+
+### 🟢 MINOR (Fix Post-Migration)
+- Style/convention changes
+- Optional optimizations
+- Documentation updates
+
+## Step 4: Create Action Plan
+For each breaking change:
+1. **Identify Impact**: Which files/components are affected?
+2. **Plan Fix**: What code changes are needed?
+3. **Estimate Effort**: Hours/days to implement
+4. **Dependencies**: What must be fixed first?
+
+## Step 5: Version-by-Version Review
+Review changes for each intermediate version:
+${Array.from({ length: parseInt(toVersion) - parseInt(fromVersion) }, (_, i) => {
+  const version = parseInt(fromVersion) + i + 1;
+  return `- **Angular ${version}**: \`migration://breaking-changes/${version}\``;
+}).join('\n')}
+
+## Step 6: Testing Strategy
+For each breaking change category:
+- **Forms Changes**: Test all form submissions and validations
+- **Router Changes**: Test all navigation and guards
+- **Component Changes**: Test all component interactions
+- **Build Changes**: Verify build succeeds with new configurations
+
+## Step 7: Documentation
+Create a migration checklist:
+- [ ] Review all breaking changes
+- [ ] Identify affected code sections
+- [ ] Create fix branches for each major change
+- [ ] Update tests for new APIs
+- [ ] Update documentation
+- [ ] Train team on new patterns
+
+## Output Format
+Provide:
+1. **Executive Summary**: Total breaking changes and estimated effort
+2. **Prioritized List**: Breaking changes sorted by criticality
+3. **Affected Areas**: Which parts of the codebase need updates
+4. **Migration Timeline**: Suggested order of fixes
+5. **Risk Assessment**: Potential blockers or complex changes
+6. **Quick Wins**: Easy fixes that can be done first
+
+Make the review comprehensive yet actionable. Focus on helping the developer understand WHAT needs to change and WHY.`,
       },
     },
   ];
