@@ -17,11 +17,11 @@ import type {
   PromptResponse,
   SessionId,
   ContentBlock,
+  TextContent,
   SessionUpdate,
   ToolCall,
   ToolCallUpdate,
   Plan,
-  PlanEntry,
 } from "./types/acp.js";
 import {
   Agent,
@@ -51,18 +51,75 @@ export interface SessionState {
 
 // Import WorkflowMigrationHandler after exports
 import { WorkflowMigrationHandler } from "./workflow/handler.js";
+import { ThreadHistoryManager } from "./threads/thread-history-manager.js";
+import { ThreadAPI } from "./threads/thread-api.js";
+import type { ThreadInitContext } from "./threads/types.js";
+import { v4 as uuidv4 } from 'uuid';
 
 class AngularMigrationAgent implements Agent {
   private transport: JsonRpcTransport;
   private sessions = new Map<SessionId, SessionState>();
   private readonly workflowHandler: WorkflowMigrationHandler;
   private sessionCounter = 0;
+  private readonly threadHistory: ThreadHistoryManager;
+  private readonly threadAPI: ThreadAPI;
+  private readonly agentId: string;
 
   constructor() {
     this.transport = new JsonRpcTransport();
     this.workflowHandler = new WorkflowMigrationHandler(this.transport);
+    this.threadHistory = new ThreadHistoryManager();
+    this.threadAPI = new ThreadAPI(this.threadHistory);
+    this.agentId = uuidv4();
     this.setupHandlers();
+
+    process.stderr.write(`[Agent] Initialized with ID: ${this.agentId}\n`);
+
+    // Initialize session counter from existing sessions (prevent ID collisions on restart)
+    this.initializeSessionCounter().catch((error: unknown) => {
+      process.stderr.write(`[Agent] ⚠️  Failed to initialize session counter: ${error}\n`);
+    });
   }
+
+  /**
+   * Initialize session counter from existing sessions
+   * Prevents session ID collisions when agent restarts
+   */
+  private async initializeSessionCounter(): Promise<void> {
+    try {
+      const sessions = await this.threadHistory.listAllSessions();
+
+      if (sessions.length === 0) {
+        // No existing sessions, start from 0
+        this.sessionCounter = 0;
+        process.stderr.write(`[Agent] Session counter initialized to 0 (no existing sessions)\n`);
+        return;
+      }
+
+      // Find highest session number from existing session IDs
+      let maxSessionNum = 0;
+      for (const session of sessions) {
+        const match = session.sessionId.match(/^session-(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxSessionNum) {
+            maxSessionNum = num;
+          }
+        }
+      }
+
+      // Start counter from highest existing session number
+      this.sessionCounter = maxSessionNum;
+      process.stderr.write(
+        `[Agent] Session counter initialized to ${this.sessionCounter} (found ${sessions.length} existing sessions)\n`
+      );
+    } catch (error) {
+      // If we can't read existing sessions, start from 0
+      process.stderr.write(`[Agent] ⚠️  Could not read existing sessions: ${error}\n`);
+      this.sessionCounter = 0;
+    }
+  }
+
   async initialize(params: InitializeRequest): Promise<InitializeResponse> {
     return this.handleInitialize(params as unknown as InitializeRequest);
   }
@@ -70,9 +127,152 @@ class AngularMigrationAgent implements Agent {
   async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
     return this.handleNewSession(params as unknown as NewSessionRequest);
   }
-  loadSession?(params: LoadSessionRequest): Promise<LoadSessionResponse> {
-    throw new Error("Method not implemented.");
+  async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
+    try {
+      process.stderr.write(
+        `[Agent] Loading session: ${params.sessionId}...\n`
+      );
+
+      // Check if thread exists
+      const hasThread = await this.threadHistory.hasThread(params.sessionId);
+      if (!hasThread) {
+        throw new Error(`Session not found: ${params.sessionId}`);
+      }
+
+      // Load thread metadata
+      const metadata = await this.threadHistory.getMetadata(params.sessionId);
+      if (!metadata) {
+        throw new Error(`Failed to load metadata for session: ${params.sessionId}`);
+      }
+
+      // Create/restore session state
+      const session: SessionState = {
+        id: params.sessionId,
+        cwd: params.cwd,
+        conversationHistory: [],
+        currentPlan: undefined,
+        activeToolCalls: new Map(),
+      };
+      this.sessions.set(params.sessionId, session);
+
+      process.stderr.write(
+        `[Agent] Session restored: ${params.sessionId} (${metadata.totalMessages} messages, ${metadata.totalToolCalls} tool calls)\n`
+      );
+
+      // Stream conversation history back to client
+      await this.streamThreadHistory(params.sessionId);
+
+      return {
+        modes: undefined,
+        _meta: {
+          threadMetadata: {
+            startedAt: metadata.startedAt,
+            lastActivityAt: metadata.lastActivityAt,
+            totalMessages: metadata.totalMessages,
+            totalToolCalls: metadata.totalToolCalls,
+            status: metadata.status,
+          },
+        },
+      };
+    } catch (error) {
+      process.stderr.write(
+        `[Agent] ❌ Failed to load session: ${error}\n`
+      );
+      throw error;
+    }
   }
+
+  /**
+   * Stream thread history back to client as session/update notifications
+   */
+  private async streamThreadHistory(sessionId: SessionId): Promise<void> {
+    try {
+      // Load messages and tool calls from thread storage
+      const messages = await this.threadHistory.loadMessages(sessionId);
+      const toolCalls = await this.threadHistory.loadToolCalls(sessionId);
+
+      // Merge and sort by timestamp
+      type HistoryItem =
+        | { type: 'message'; timestamp: string; data: typeof messages[0] }
+        | { type: 'toolCall'; timestamp: string; data: typeof toolCalls[0] };
+
+      const historyItems: HistoryItem[] = [
+        ...messages.map(msg => ({ type: 'message' as const, timestamp: msg.timestamp, data: msg })),
+        ...toolCalls.map(tc => ({ type: 'toolCall' as const, timestamp: tc.timestamp, data: tc })),
+      ];
+
+      historyItems.sort((a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      // Replay history in chronological order
+      for (const item of historyItems) {
+        if (item.type === 'message') {
+          const msg = item.data;
+
+          // Determine update type based on message type
+          let updateType: SessionUpdate['sessionUpdate'];
+          if (msg.type === 'user') {
+            updateType = 'user_message_chunk';
+          } else if (msg.type === 'agent_thought') {
+            updateType = 'agent_thought_chunk';
+          } else if (msg.type === 'agent_message') {
+            updateType = 'agent_message_chunk';
+          } else {
+            continue; // Skip system messages
+          }
+
+          // Send message as session update
+          await this.sendUpdate(sessionId, {
+            sessionUpdate: updateType,
+            content: msg.content,
+          });
+        } else if (item.type === 'toolCall') {
+          const tc = item.data;
+
+          // Send tool call start
+          if (tc.status === 'pending' || tc.status === 'in_progress') {
+            await this.sendUpdate(sessionId, {
+              sessionUpdate: 'tool_call',
+              toolCall: {
+                toolCallId: tc.toolCallId,
+                title: tc.title,
+                kind: tc.kind,
+                status: tc.status,
+                rawInput: tc.rawInput,
+                content: tc.content,
+                locations: tc.locations,
+              },
+            });
+          }
+
+          // If completed or failed, send update
+          if (tc.status === 'completed' || tc.status === 'failed') {
+            await this.sendUpdate(sessionId, {
+              sessionUpdate: 'tool_call_update',
+              update: {
+                toolCallId: tc.toolCallId,
+                status: tc.status,
+                rawOutput: tc.rawOutput,
+                content: tc.content,
+                locations: tc.locations,
+              },
+            });
+          }
+        }
+      }
+
+      process.stderr.write(
+        `[Agent] ✅ Streamed ${messages.length} messages and ${toolCalls.length} tool calls\n`
+      );
+    } catch (error) {
+      process.stderr.write(
+        `[Agent] ❌ Failed to stream thread history: ${error}\n`
+      );
+      throw error;
+    }
+  }
+
   setSessionMode?(
     params: SetSessionModeRequest
   ): Promise<SetSessionModeResponse | void> {
@@ -115,7 +315,7 @@ class AngularMigrationAgent implements Agent {
 
     // Handle session creation
     this.transport.onRequest("session/new", async (_method, params) => {
-      return this.handleNewSession(params as unknown as NewSessionRequest);
+      return await this.handleNewSession(params as unknown as NewSessionRequest);
     });
 
     // Handle user prompts
@@ -148,14 +348,36 @@ class AngularMigrationAgent implements Agent {
           sse: false,
         },
         sessionCapabilities: {},
-        loadSession: false,
+        loadSession: true,
       },
       authMethods: [],
     };
   }
 
-  private handleNewSession(request: NewSessionRequest): NewSessionResponse {
-    const sessionId = `session-${++this.sessionCounter}`;
+  private async handleNewSession(request: NewSessionRequest): Promise<NewSessionResponse> {
+    // Generate unique session ID (avoid collisions with existing threads)
+    let sessionId: string;
+    let attempts = 0;
+    const maxAttempts = 100;
+
+    do {
+      sessionId = `session-${++this.sessionCounter}`;
+      attempts++;
+
+      // Safety check: if thread already exists, try next number
+      const exists = await this.threadHistory.hasThread(sessionId);
+      if (!exists) {
+        break;
+      }
+
+      process.stderr.write(
+        `[Agent] ⚠️  Session ${sessionId} already exists, trying next number...\n`
+      );
+    } while (attempts < maxAttempts);
+
+    if (attempts >= maxAttempts) {
+      throw new Error('Failed to generate unique session ID after 100 attempts');
+    }
 
     this.sessions.set(sessionId, {
       id: sessionId,
@@ -163,6 +385,23 @@ class AngularMigrationAgent implements Agent {
       conversationHistory: [],
       activeToolCalls: new Map(),
     });
+
+    // Create thread for this session
+    try {
+      const threadContext: ThreadInitContext = {
+        sessionId,
+        agentId: this.agentId,
+        agentVersion: '1.0.0',
+        projectPath: request.cwd,
+        migrationType: 'guidance', // Default, will be updated based on query
+      };
+
+      await this.threadHistory.createThread(threadContext);
+      process.stderr.write(`[Agent] ✅ Created new session: ${sessionId}\n`);
+    } catch (error) {
+      process.stderr.write(`[Agent] ❌ Failed to create thread: ${error}\n`);
+      // Don't fail session creation if thread creation fails
+    }
 
     return {
       sessionId,
@@ -182,9 +421,31 @@ class AngularMigrationAgent implements Agent {
     // Add user message to history
     session.conversationHistory.push(...request.prompt);
 
+    // Log user messages to thread history
+    for (const block of request.prompt) {
+      try {
+        await this.threadHistory.appendMessage({
+          timestamp: new Date().toISOString(),
+          type: 'user',
+          sessionId: request.sessionId,
+          agentId: this.agentId,
+          content: block,
+          context: this.getCurrentContext(session),
+        });
+      } catch (error) {
+        process.stderr.write(`[Agent] Warning: Failed to log user message: ${error}\n`);
+      }
+    }
+
     // Extract user query
     const userQuery = this.extractTextFromPrompt(request.prompt);
     process.stderr.write(`[Agent] User query: "${userQuery}"\n`);
+
+    // Check for session management commands
+    const commandResponse = await this.handleSessionCommand(request.sessionId, userQuery);
+    if (commandResponse) {
+      return commandResponse;
+    }
 
     // Check if awaiting confirmation
     if (session.awaitingConfirmation) {
@@ -949,23 +1210,61 @@ Just tell me what you need, and I'll help guide you through the migration!`;
   }
 
   private async sendMessage(sessionId: SessionId, text: string): Promise<void> {
+    const contentBlock: TextContent = {
+      type: "text",
+      text,
+    };
+
     await this.sendUpdate(sessionId, {
       sessionUpdate: "agent_message_chunk",
-      content: {
-        type: "text",
-        text,
-      },
+      content: contentBlock,
     });
+
+    // Log agent message to thread history
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      try {
+        await this.threadHistory.appendMessage({
+          timestamp: new Date().toISOString(),
+          type: 'agent_message',
+          sessionId,
+          agentId: this.agentId,
+          content: contentBlock,
+          context: this.getCurrentContext(session),
+        });
+      } catch (error) {
+        process.stderr.write(`[Agent] Warning: Failed to log agent message: ${error}\n`);
+      }
+    }
   }
 
   private async sendThought(sessionId: SessionId, text: string): Promise<void> {
+    const contentBlock: TextContent = {
+      type: "text",
+      text,
+    };
+
     await this.sendUpdate(sessionId, {
       sessionUpdate: "agent_thought_chunk",
-      content: {
-        type: "text",
-        text,
-      },
+      content: contentBlock,
     });
+
+    // Log agent thought to thread history
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      try {
+        await this.threadHistory.appendMessage({
+          timestamp: new Date().toISOString(),
+          type: 'agent_thought',
+          sessionId,
+          agentId: this.agentId,
+          content: contentBlock,
+          context: this.getCurrentContext(session),
+        });
+      } catch (error) {
+        process.stderr.write(`[Agent] Warning: Failed to log agent thought: ${error}\n`);
+      }
+    }
   }
 
   private async sendPlan(sessionId: SessionId, plan: Plan): Promise<void> {
@@ -1000,6 +1299,29 @@ Just tell me what you need, and I'll help guide you through the migration!`;
       toolCall,
     });
 
+    // Log tool call to thread history
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      try {
+        await this.threadHistory.appendToolCall({
+          timestamp: new Date().toISOString(),
+          sessionId,
+          agentId: this.agentId,
+          toolCallId,
+          title,
+          kind: kind || 'other',
+          status: 'in_progress',
+          rawInput: input,
+          content: [],
+          locations: [],
+          startedAt: new Date().toISOString(),
+          context: this.getCurrentContext(session),
+        });
+      } catch (error) {
+        process.stderr.write(`[Agent] Warning: Failed to log tool call: ${error}\n`);
+      }
+    }
+
     return toolCall;
   }
 
@@ -1015,6 +1337,274 @@ Just tell me what you need, and I'll help guide you through the migration!`;
         ...update,
       },
     });
+
+    // Log tool call update to thread history (if completed or failed)
+    if (update.status === 'completed' || update.status === 'failed') {
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        try {
+          // We append the completed/failed tool call as a new entry with updated status
+          await this.threadHistory.appendToolCall({
+            timestamp: new Date().toISOString(),
+            sessionId,
+            agentId: this.agentId,
+            toolCallId,
+            title: 'Tool Call Update', // Title not available in update
+            kind: 'other',
+            status: update.status,
+            rawOutput: update.rawOutput,
+            content: update.content || [],
+            locations: [],
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            error: update.status === 'failed' ? 'Tool call failed' : undefined,
+            context: this.getCurrentContext(session),
+          });
+        } catch (error) {
+          process.stderr.write(`[Agent] Warning: Failed to log tool call update: ${error}\n`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Get current context for thread logging
+   */
+  private getCurrentContext(session: SessionState): {
+    currentStep?: string;
+    stepIndex?: number;
+    awaitingConfirmation?: boolean;
+  } {
+    const context: any = {};
+
+    if (session.awaitingConfirmation) {
+      context.awaitingConfirmation = true;
+    }
+
+    // Add workflow context if available (would be populated by workflow handler)
+    // For now, basic context is sufficient
+    return context;
+  }
+
+  /**
+   * Handle session management commands
+   * Returns PromptResponse if command was handled, null otherwise
+   */
+  private async handleSessionCommand(
+    sessionId: SessionId,
+    userQuery: string
+  ): Promise<PromptResponse | null> {
+    const query = userQuery.toLowerCase().trim();
+
+    // List sessions command
+    if (
+      query === 'list sessions' ||
+      query === 'show sessions' ||
+      query === 'sessions'
+    ) {
+      const sessions = await this.threadAPI.listSessions({ limit: 10 });
+
+      if (sessions.length === 0) {
+        await this.sendMessage(sessionId, '📋 **Available Sessions**\n\nNo previous sessions found.');
+      } else {
+        // Build formatted session list
+        let message = '📋 **Available Sessions**\n\n';
+
+        for (let i = 0; i < sessions.length; i++) {
+          const sess = sessions[i];
+          const statusEmoji = sess.status === 'active' ? '🟢' :
+                             sess.status === 'completed' ? '✅' :
+                             sess.status === 'failed' ? '❌' : '⚪';
+
+          message += `${statusEmoji} **${sess.title}**\n`;
+          message += `   📌 ID: \`${sess.sessionId}\`\n`;
+          message += `   📊 ${sess.description}\n`;
+          message += `   🕐 Started: ${sess.startedAt.toLocaleString()}\n`;
+
+          // Add separator between sessions (except after last one)
+          if (i < sessions.length - 1) {
+            message += '\n';
+          }
+        }
+
+        message += '\n\n💡 **Tip:** Type \`load session <session-id>\` to restore a previous conversation.';
+
+        await this.sendMessage(sessionId, message);
+      }
+
+      return { stopReason: 'end_turn' };
+    }
+
+    // Load session command
+    if (
+      query.startsWith('load session ') ||
+      query.startsWith('restore session ')
+    ) {
+      const targetSessionId = query
+        .replace(/^(load|restore) session /, '')
+        .trim();
+
+      await this.sendMessage(sessionId, `🔄 Loading session: \`${targetSessionId}\`...\n`);
+
+      const hasThread = await this.threadHistory.hasThread(targetSessionId);
+      if (!hasThread) {
+        await this.sendMessage(
+          sessionId,
+          `❌ Session \`${targetSessionId}\` not found.\n\n` +
+          `Type \`list sessions\` to see available sessions.`
+        );
+        return { stopReason: 'end_turn' };
+      }
+
+      // Load and stream the session history
+      try {
+        await this.streamThreadHistory(targetSessionId);
+
+        await this.sendMessage(
+          sessionId,
+          `\n✅ Session \`${targetSessionId}\` restored successfully!`
+        );
+      } catch (error) {
+        await this.sendMessage(
+          sessionId,
+          `❌ Failed to load session: ${error}`
+        );
+      }
+
+      return { stopReason: 'end_turn' };
+    }
+
+    // Search sessions command
+    if (
+      query.startsWith('search sessions ') ||
+      query.startsWith('find sessions ')
+    ) {
+      const searchQuery = query
+        .replace(/^(search|find) sessions /, '')
+        .trim();
+
+      const results = await this.threadAPI.searchSessions(searchQuery);
+
+      if (results.length === 0) {
+        await this.sendMessage(
+          sessionId,
+          `🔍 **Searching for:** "${searchQuery}"\n\nNo matching sessions found.`
+        );
+      } else {
+        let message = `🔍 **Searching for:** "${searchQuery}"\n\n`;
+        message += `Found **${results.length}** session(s):\n\n`;
+
+        for (let i = 0; i < results.length; i++) {
+          const sess = results[i];
+          const statusEmoji = sess.status === 'active' ? '🟢' :
+                             sess.status === 'completed' ? '✅' :
+                             sess.status === 'failed' ? '❌' : '⚪';
+
+          message += `${statusEmoji} **${sess.title}**\n`;
+          message += `   📌 ID: \`${sess.sessionId}\`\n`;
+          message += `   📊 ${sess.description}\n`;
+
+          // Add separator between results (except after last one)
+          if (i < results.length - 1) {
+            message += '\n';
+          }
+        }
+
+        await this.sendMessage(sessionId, message);
+      }
+
+      return { stopReason: 'end_turn' };
+    }
+
+    // Show current session info
+    if (
+      query === 'show session' ||
+      query === 'current session' ||
+      query === 'session info'
+    ) {
+      const metadata = await this.threadHistory.getMetadata(sessionId);
+
+      if (metadata) {
+        let message = '📄 **Current Session Info**\n\n';
+        message += `📌 **ID:** \`${metadata.sessionId}\`\n`;
+        message += `🔄 **Status:** ${metadata.status}\n`;
+        message += `📋 **Type:** ${metadata.migrationType}\n`;
+        message += `💬 **Messages:** ${metadata.totalMessages}\n`;
+        message += `🔧 **Tool calls:** ${metadata.totalToolCalls}\n`;
+        message += `🕐 **Started:** ${new Date(metadata.startedAt).toLocaleString()}\n`;
+        message += `⏱️  **Last activity:** ${new Date(metadata.lastActivityAt).toLocaleString()}\n`;
+
+        if (metadata.tags.length > 0) {
+          message += `🏷️  **Tags:** ${metadata.tags.join(', ')}\n`;
+        }
+
+        await this.sendMessage(sessionId, message);
+      } else {
+        await this.sendMessage(
+          sessionId,
+          '📄 **Current Session Info**\n\nSession metadata not found.'
+        );
+      }
+
+      return { stopReason: 'end_turn' };
+    }
+
+    // Show statistics
+    if (
+      query === 'stats' ||
+      query === 'statistics' ||
+      query === 'session stats'
+    ) {
+      const stats = await this.threadAPI.getStatistics();
+
+      let message = '📊 **Thread History Statistics**\n\n';
+      message += `📁 **Total sessions:** ${stats.totalSessions}\n`;
+      message += `   🟢 Active: ${stats.activeSessions}\n`;
+      message += `   ✅ Completed: ${stats.completedSessions}\n`;
+      message += `   ❌ Failed: ${stats.failedSessions}\n`;
+      message += `\n💬 **Total messages:** ${stats.totalMessages}\n`;
+      message += `🔧 **Total tool calls:** ${stats.totalToolCalls}\n`;
+
+      if (stats.oldestSession) {
+        message += `\n📅 **Oldest session:** ${stats.oldestSession.toLocaleDateString()}\n`;
+      }
+      if (stats.newestSession) {
+        message += `📅 **Newest session:** ${stats.newestSession.toLocaleDateString()}\n`;
+      }
+
+      await this.sendMessage(sessionId, message);
+
+      return { stopReason: 'end_turn' };
+    }
+
+    // Help command for session management
+    if (
+      query === 'session help' ||
+      query === 'help sessions'
+    ) {
+      await this.sendMessage(
+        sessionId,
+        '📖 **Session Management Commands**\n\n' +
+        '**List & Search:**\n' +
+        '• `list sessions` or `sessions` - Show all sessions\n' +
+        '• `search sessions <query>` - Search sessions\n' +
+        '• `stats` or `statistics` - Show statistics\n\n' +
+        '**Session Info:**\n' +
+        '• `show session` or `session info` - Show current session\n' +
+        '• `load session <session-id>` - Restore session\n\n' +
+        '**Examples:**\n' +
+        '• `sessions` - List all sessions\n' +
+        '• `search sessions migration` - Find migration-related sessions\n' +
+        '• `load session session-1` - Restore session-1\n' +
+        '• `stats` - View statistics\n\n' +
+        '💡 **Tip:** Use natural commands - they work seamlessly in conversation!'
+      );
+
+      return { stopReason: 'end_turn' };
+    }
+
+    // No command matched
+    return null;
   }
 
   private async sendUpdate(

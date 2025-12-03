@@ -16,6 +16,12 @@ export interface AppConfig {
   /** Default checkpoint storage directory */
   checkpointDir: string;
 
+  /** Thread history storage directory */
+  threadsDir: string;
+
+  /** Agent registry and messages storage directory */
+  agentsDir: string;
+
   /** Workflow options */
   workflow: {
     skipTests: boolean;
@@ -51,6 +57,28 @@ function getCheckpointDir(): string {
 }
 
 /**
+ * Get threads directory from environment or use default
+ */
+function getThreadsDir(): string {
+  if (process.env.THREADS_DIR) {
+    return process.env.THREADS_DIR;
+  }
+
+  return path.join(os.homedir(), '.angular-migration', 'threads');
+}
+
+/**
+ * Get agents directory from environment or use default
+ */
+function getAgentsDir(): string {
+  if (process.env.AGENTS_DIR) {
+    return process.env.AGENTS_DIR;
+  }
+
+  return path.join(os.homedir(), '.angular-migration', 'agents');
+}
+
+/**
  * Load application configuration from environment variables
  */
 export function loadConfig(): AppConfig {
@@ -58,6 +86,8 @@ export function loadConfig(): AppConfig {
     workshopRoot: getWorkshopRoot(),
     projectRoot: process.env.PROJECT_ROOT,
     checkpointDir: getCheckpointDir(),
+    threadsDir: getThreadsDir(),
+    agentsDir: getAgentsDir(),
     workflow: {
       skipTests: process.env.SKIP_TESTS === 'true',
       skipLint: process.env.SKIP_LINT === 'true',
@@ -79,6 +109,8 @@ export function logConfig(): void {
   process.stderr.write('[Config] Loaded configuration:\n');
   process.stderr.write(`  Workshop Root: ${config.workshopRoot}\n`);
   process.stderr.write(`  Checkpoint Dir: ${config.checkpointDir}\n`);
+  process.stderr.write(`  Threads Dir: ${config.threadsDir}\n`);
+  process.stderr.write(`  Agents Dir: ${config.agentsDir}\n`);
   if (config.projectRoot) {
     process.stderr.write(`  Project Root: ${config.projectRoot}\n`);
   }

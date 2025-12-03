@@ -346,6 +346,19 @@ export interface NewSessionResponse {
   _meta?: Record<string, unknown>;
 }
 
+// session/load
+export interface LoadSessionRequest {
+  sessionId: SessionId;
+  cwd: string;
+  mcpServers: McpServer[];
+  _meta?: Record<string, unknown>;
+}
+
+export interface LoadSessionResponse {
+  modes?: unknown;
+  _meta?: Record<string, unknown>;
+}
+
 // session/prompt
 export interface PromptRequest {
   sessionId: SessionId;
