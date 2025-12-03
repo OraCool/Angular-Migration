@@ -18,10 +18,19 @@ import * as migrationStageTools from './migration-stages.js';
 import * as stateTools from './state.js';
 import * as validationTools from './validation.js';
 import * as packageTools from './packages.js';
+import * as backupRestoreTools from './backup-restore.js';
 
 /**
  * All available MCP tools
- * Stage-based architecture with 12 migration stage tools + 10 supporting tools
+ * Stage-based architecture:
+ * - 8 core migration stage tools (pre-migration, v15-v20, post-migration)
+ * - 1 optional feature migration tool (standalone)
+ * - 4 stage management tools
+ * - 4 state management tools
+ * - 3 validation tools
+ * - 3 package management tools
+ * - 2 backup/restore tools
+ * Total: 25 tools
  */
 const TOOLS: Tool[] = [
   // ========================================
@@ -366,6 +375,80 @@ const TOOLS: Tool[] = [
       required: ['projectPath', 'fromVersion', 'toVersion'],
     },
   },
+
+  // Backup and Restore (2 tools)
+  {
+    name: 'migration_backup',
+    description: 'Create a backup of the Angular project (optional, can be done at any time)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'Session ID',
+        },
+        backupName: {
+          type: 'string',
+          description: 'Custom backup name (optional, auto-generated if not provided)',
+        },
+        skipNodeModules: {
+          type: 'boolean',
+          description: 'Skip backing up node_modules (default: true, recommended)',
+        },
+        skipGit: {
+          type: 'boolean',
+          description: 'Skip backing up .git directory (default: false, keeps version history)',
+        },
+        skipDist: {
+          type: 'boolean',
+          description: 'Skip backing up dist directory (default: true)',
+        },
+        skipCoverage: {
+          type: 'boolean',
+          description: 'Skip backing up coverage directory (default: true)',
+        },
+      },
+      required: ['sessionId'],
+    },
+  },
+  {
+    name: 'migration_restore',
+    description: 'Restore the Angular project from a backup',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'Session ID',
+        },
+        backupPath: {
+          type: 'string',
+          description: 'Absolute path to backup directory (use this OR backupName)',
+        },
+        backupName: {
+          type: 'string',
+          description: 'Backup name from .migration-backups (use this OR backupPath)',
+        },
+        force: {
+          type: 'boolean',
+          description: 'Force restore even if backup metadata is missing (default: false)',
+        },
+        createSafetyBackup: {
+          type: 'boolean',
+          description: 'Create safety backup of current state before restoring (default: true, recommended)',
+        },
+        preserveGit: {
+          type: 'boolean',
+          description: 'Preserve .git directory during restore (default: true)',
+        },
+        reinstallDependencies: {
+          type: 'boolean',
+          description: 'Reinstall node_modules after restore (default: true)',
+        },
+      },
+      required: ['sessionId'],
+    },
+  },
 ];
 
 /**
@@ -389,6 +472,8 @@ export function registerTools(server: Server, sessionManager: SessionManager): v
 
       if (name.startsWith('migration_stage_') || name.startsWith('migration_feature_')) {
         result = await migrationStageTools.handleMigrationStageTool(name, toolArgs, sessionManager);
+      } else if (name === 'migration_backup' || name === 'migration_restore') {
+        result = await backupRestoreTools.handleBackupRestoreTool(name, toolArgs, sessionManager);
       } else if (name.startsWith('state_')) {
         result = await stateTools.handleStateTool(name, toolArgs, sessionManager);
       } else if (name.startsWith('validate_')) {

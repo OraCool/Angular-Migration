@@ -1,20 +1,123 @@
-# Angular Migration Agent for Zed IDE
+# Angular Migration Toolkit
 
-An AI agent that helps migrate Angular applications from version 14 to version 20, integrated with Zed IDE via the Agent Client Protocol (ACP).
+AI-powered tooling for automated Angular 14 → 20 migration with two integration options:
 
-## Features
+1. **🆕 MCP Server** (Recommended) - Model Context Protocol server compatible with:
+   - **Zed IDE** (native support)
+   - **VS Code** (via MCP extension)
+   - **Claude Desktop** (native support)
+   - Any MCP-compatible client
 
-This agent provides intelligent assistance for:
+2. **ACP Agent** (Legacy) - Agent Client Protocol for Zed IDE only
 
-- **Codebase Analysis** - Scan Angular projects to identify migration needs
-- **Standalone Components** - Automated conversion from NgModules
-- **Control Flow Syntax** - Migrate `*ngIf/*ngFor/*ngSwitch` to `@if/@for/@switch`
-- **Signal-Based APIs** - Convert `@Input/@Output` to `input()/output()/model()`
-- **Angular Material Updates** - Migrate to standalone Material components
-- **Migration Planning** - Generate phased migration strategies with risk assessment
-- **Step-by-Step Guidance** - Detailed commands and manual steps
+---
 
-## Prerequisites
+## 🚀 Quick Start - MCP Server (Recommended)
+
+The MCP server provides 25 stage-based tools for automated migration with better structure and error handling.
+
+### Installation (5 minutes)
+
+```bash
+# Build the server
+cd Angular-Migration
+npm install
+cd packages/workflow-engine && npm run build
+cd ../mcp-server && npm run build
+
+# Get your path
+pwd  # Copy this path
+```
+
+### Configuration
+
+**Zed IDE** - Add to settings.json (`⌘,`):
+```json
+{
+  "context_servers": {
+    "angular-migration": {
+      "command": "node",
+      "args": ["/YOUR/PATH/packages/mcp-server/dist/index.js"]
+    }
+  }
+}
+```
+
+**VS Code** - Add to `.vscode/settings.json`:
+```json
+{
+  "mcp.servers": {
+    "angular-migration": {
+      "command": "node",
+      "args": ["/YOUR/PATH/packages/mcp-server/dist/index.js"]
+    }
+  }
+}
+```
+
+**Claude Desktop** - Edit `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "angular-migration": {
+      "command": "node",
+      "args": ["/YOUR/PATH/packages/mcp-server/dist/index.js"]
+    }
+  }
+}
+```
+
+📖 **Full MCP Documentation**: [`packages/mcp-server/README.md`](./packages/mcp-server/README.md)
+⚡ **Quick Start Guide**: [`docs/MCP_QUICKSTART.md`](./docs/MCP_QUICKSTART.md)
+
+---
+
+## Features (MCP Server)
+
+### 🎯 Stage-Based Migration (25 Tools)
+
+**8 Core Stages**:
+- Pre-migration (backup, validation, git commit)
+- Angular 15, 16, 17, 18, 19, 20 upgrades
+- Post-migration reporting
+
+**Optional Features**:
+- Standalone components migration (can run anytime after v15)
+
+**Stage Management**:
+- Get current stage with progress
+- Skip to specific version
+- List all stages with status
+- Validate Node.js version
+
+**Supporting Tools**:
+- State management (checkpoints)
+- Project validation
+- Package compatibility checks
+- Backup and restore
+- Breaking changes detection
+
+### ✨ Key Capabilities
+
+- **Cross-Platform Support**: Windows (PowerShell), macOS, Linux (bash)
+- **Node.js v22 Validation**: Ensures compatibility before execution
+- **Resumption Support**: Continue from checkpoints after failures
+- **Comprehensive Error Reporting**: Detailed diagnostics with troubleshooting
+- **Next-Step Recommendations**: Every tool suggests what to do next
+- **Automated Fixes**: Version-specific breaking change transformations
+- **Backup/Restore**: Create and restore project snapshots anytime
+
+---
+
+## 📚 Legacy ACP Agent (Zed IDE Only)
+
+The original Agent Client Protocol implementation for Zed IDE. See instructions below if you prefer the ACP agent over the MCP server.
+
+**Note**: The MCP server is recommended for new projects as it provides better structure, error handling, and multi-IDE support.
+
+---
+
+## Prerequisites (for both MCP and ACP)
 
 - Node.js 18+ and npm
 - [NVM (Node Version Manager)](https://github.com/nvm-sh/nvm) - **Recommended** for automatic version switching
@@ -39,9 +142,13 @@ npm start
 
 See [docs/NODE_VERSION_MANAGEMENT.md](./docs/NODE_VERSION_MANAGEMENT.md) for details.
 
-## Installation
+---
 
-### 1. Build the Agent
+## ACP Agent Installation (Legacy - Zed IDE Only)
+
+⚠️ **Consider using the MCP server instead** - see [Quick Start](#-quick-start---mcp-server-recommended) above.
+
+### 1. Build the ACP Agent
 
 ```bash
 # Clone or navigate to this directory
@@ -54,9 +161,9 @@ npm install
 npm run build
 ```
 
-### 2. Configure Zed IDE
+### 2. Configure Zed IDE for ACP Agent
 
-Add the agent to your Zed settings. Open Zed settings:
+Add the ACP agent to your Zed settings. Open Zed settings:
 
 - **macOS**: `Zed > Settings...` or `Cmd+,`
 - **Linux**: `File > Settings` or `Ctrl+,`

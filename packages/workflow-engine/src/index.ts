@@ -88,3 +88,61 @@ export {
 } from './utils/node-version.js';
 
 export type { NodeVersionRequirement } from './utils/node-version.js';
+
+// Package management utilities
+export {
+  cleanPackages,
+  detectPackageManager,
+  hasNodeModules,
+  getNodeModulesSize,
+  formatBytes,
+} from './utils/package-manager.js';
+
+export type {
+  CleanPackagesOptions,
+  CleanPackagesResult,
+  PackageManagerInfo,
+} from './utils/package-manager.js';
+
+// Backup and restore utilities
+export {
+  createBackup,
+  restoreBackup,
+  listBackups,
+  getBackupMetadata,
+  deleteBackup,
+} from './utils/backup.js';
+
+export type {
+  BackupOptions,
+  BackupResult,
+  BackupMetadata,
+  RestoreOptions,
+  RestoreResult,
+} from './utils/backup.js';
+
+// Package update utilities
+export {
+  updatePackages,
+  getCurrentAngularVersion,
+  validatePackageJson,
+} from './utils/package-updater.js';
+
+export type {
+  PackageUpdateOptions,
+  PackageUpdateResult,
+  PackageChange,
+  CompatibilityMatrix,
+  VersionConfig,
+} from './utils/package-updater.js';
+
+// Breaking changes utilities
+export {
+  applyBreakingChangeFixes,
+} from './utils/breaking-changes.js';
+
+export type {
+  BreakingChangeFix,
+  FixResult,
+  FileReplacement,
+} from './utils/breaking-changes.js';

@@ -18,6 +18,11 @@ import {
   getStageById as getStageDefinitionById,
   getStageByStepIndex,
 } from './workflow-stages.js';
+import { execSync } from 'child_process';
+import { getPlatform, getShellCommand } from '../utils/platform.js';
+import { cleanPackages } from '../utils/package-manager.js';
+import { updatePackages } from '../utils/package-updater.js';
+import { applyBreakingChangeFixes } from '../utils/breaking-changes.js';
 
 export interface WorkflowStep {
   id: string;
@@ -1306,19 +1311,68 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
     options: StageExecutionOptions = {}
   ): Promise<StepExecutionResult> {
     const startTime = Date.now();
+    const outputs: string[] = [];
 
     try {
-      // This is a placeholder implementation
-      // In a real implementation, this would execute all actions in the step
-      // For now, we'll just return a success result
-      // The actual execution logic would be implemented by the tool handlers
+      // Clean packages before version upgrade steps (if it's an upgrade step)
+      if (step.id.startsWith('upgrade-v') && !options.skipPackageClean) {
+        outputs.push('🧹 Cleaning packages before upgrade...');
+        const cleanResult = await cleanPackages({
+          projectPath: this.context.projectPath,
+          removeNodeModules: true,
+          removeLockFile: true,
+          reinstall: false, // Don't reinstall yet - updatePackages will do that
+        });
+
+        if (cleanResult.success) {
+          outputs.push('✅ Packages cleaned successfully');
+        } else {
+          outputs.push(`⚠️  Package clean warning: ${cleanResult.error}`);
+        }
+      }
+
+      // Get already completed actions for this step
+      const completedActions = this.state.completedActions.get(step.id) || [];
+
+      // Execute each action in the step
+      for (const action of step.actions) {
+        // Skip already completed actions (for resumption)
+        if (completedActions.includes(action.name)) {
+          outputs.push(`⏭️  Skipping already completed action: ${action.name}`);
+          continue;
+        }
+
+        outputs.push(`\n▶️  Executing: ${action.description}`);
+
+        const actionResult = await this.executeAction(action, step, options);
+
+        if (actionResult.output) {
+          outputs.push(actionResult.output);
+        }
+
+        if (!actionResult.success) {
+          if (action.continueOnError) {
+            outputs.push(`⚠️  Action failed but continuing: ${actionResult.error}`);
+          } else {
+            throw new Error(`Action '${action.name}' failed: ${actionResult.error}`);
+          }
+        } else {
+          outputs.push(`✅ ${action.name} completed`);
+
+          // Mark action as completed
+          if (!this.state.completedActions.has(step.id)) {
+            this.state.completedActions.set(step.id, []);
+          }
+          this.state.completedActions.get(step.id)!.push(action.name);
+        }
+      }
 
       const duration = Date.now() - startTime;
 
       return {
         stepId: step.id,
         success: true,
-        output: `Step ${step.id} executed successfully`,
+        output: outputs.join('\n'),
         duration,
         timestamp: new Date().toISOString(),
       };
@@ -1330,10 +1384,303 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
         stepId: step.id,
         success: false,
         error: errorMessage,
+        output: outputs.join('\n'),
         duration,
         timestamp: new Date().toISOString(),
       };
     }
+  }
+
+  /**
+   * Execute a single action
+   * @param action - The action to execute
+   * @param step - The parent workflow step
+   * @param options - Execution options
+   * @returns Action execution result
+   */
+  private async executeAction(
+    action: WorkflowAction,
+    step: WorkflowStep,
+    options: StageExecutionOptions = {}
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    try {
+      switch (action.type) {
+        case 'command':
+          return await this.executeCommandAction(action);
+
+        case 'schematic':
+          return await this.executeSchematicAction(action);
+
+        case 'script':
+          return await this.executeScriptAction(action);
+
+        case 'tool':
+          return await this.executeToolAction(action, step);
+
+        case 'auto-fix':
+          return await this.executeAutoFixAction(action, step);
+
+        case 'manual':
+          return this.executeManualAction(action);
+
+        default:
+          throw new Error(`Unknown action type: ${(action as any).type}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
+  }
+
+  /**
+   * Execute a command action (shell command)
+   */
+  private async executeCommandAction(
+    action: WorkflowAction
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    if (!action.command) {
+      throw new Error('Command action requires a command');
+    }
+
+    try {
+      const platform = getPlatform();
+      const command = getShellCommand(action.command, platform);
+      const workingDir = action.workingDir || this.context.projectPath;
+
+      const output = execSync(command, {
+        cwd: workingDir,
+        encoding: 'utf8',
+        timeout: action.timeout || 120000, // Default 2 minutes
+        stdio: 'pipe',
+      });
+
+      return {
+        success: true,
+        output: output.trim(),
+      };
+    } catch (error: any) {
+      // execSync throws on non-zero exit, but that's not always an error
+      // (e.g., "git commit" returns 1 if nothing to commit)
+      const output = error.stdout ? error.stdout.toString() : '';
+      const stderr = error.stderr ? error.stderr.toString() : '';
+
+      // Check if this is an acceptable "error" (e.g., git commit with no changes)
+      if (action.command?.includes('|| true') || action.command?.includes('git commit')) {
+        return {
+          success: true,
+          output: output || stderr || 'Command completed (no output)',
+        };
+      }
+
+      return {
+        success: false,
+        error: stderr || error.message,
+        output,
+      };
+    }
+  }
+
+  /**
+   * Execute a schematic action (Angular CLI schematic)
+   */
+  private async executeSchematicAction(
+    action: WorkflowAction
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    if (!action.command) {
+      throw new Error('Schematic action requires a command');
+    }
+
+    try {
+      const platform = getPlatform();
+      const command = getShellCommand(action.command, platform);
+
+      const output = execSync(command, {
+        cwd: this.context.projectPath,
+        encoding: 'utf8',
+        timeout: action.timeout || 300000, // Default 5 minutes for schematics
+        stdio: 'pipe',
+      });
+
+      return {
+        success: true,
+        output: output.trim(),
+      };
+    } catch (error: any) {
+      const stderr = error.stderr ? error.stderr.toString() : '';
+      const stdout = error.stdout ? error.stdout.toString() : '';
+
+      return {
+        success: false,
+        error: stderr || error.message,
+        output: stdout,
+      };
+    }
+  }
+
+  /**
+   * Execute a script action (shell script file)
+   */
+  private async executeScriptAction(
+    action: WorkflowAction
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    if (!action.scriptPath) {
+      throw new Error('Script action requires a scriptPath');
+    }
+
+    try {
+      const platform = getPlatform();
+      const scriptCommand = platform === 'windows'
+        ? `powershell -ExecutionPolicy Bypass -File "${action.scriptPath}"`
+        : `bash "${action.scriptPath}"`;
+
+      const args = action.args ? ' ' + action.args.join(' ') : '';
+      const fullCommand = scriptCommand + args;
+
+      const output = execSync(fullCommand, {
+        cwd: action.workingDir || this.context.projectPath,
+        encoding: 'utf8',
+        timeout: action.timeout || 300000, // Default 5 minutes
+        stdio: 'pipe',
+      });
+
+      return {
+        success: true,
+        output: output.trim(),
+      };
+    } catch (error: any) {
+      const stderr = error.stderr ? error.stderr.toString() : '';
+      const stdout = error.stdout ? error.stdout.toString() : '';
+
+      return {
+        success: false,
+        error: stderr || error.message,
+        output: stdout,
+      };
+    }
+  }
+
+  /**
+   * Execute a tool action (call internal utility function)
+   */
+  private async executeToolAction(
+    action: WorkflowAction,
+    step: WorkflowStep
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    if (!action.toolName) {
+      throw new Error('Tool action requires a toolName');
+    }
+
+    const toolParams = action.toolParams || {};
+
+    try {
+      switch (action.toolName) {
+        case 'update_packages': {
+          const targetVersion = toolParams.targetVersion || step.version;
+          if (!targetVersion) {
+            throw new Error('update_packages requires targetVersion parameter or step version');
+          }
+
+          const result = await updatePackages({
+            projectPath: this.context.projectPath,
+            targetVersion,
+            createBackup: false, // Already handled by workflow
+            dryRun: false,
+          });
+
+          if (!result.success) {
+            return {
+              success: false,
+              error: result.error || result.message,
+            };
+          }
+
+          const changes = result.changes || [];
+          const removed = result.removed || [];
+          let output = `Updated ${changes.length} packages to Angular ${targetVersion}`;
+
+          if (removed.length > 0) {
+            output += `\nRemoved ${removed.length} deprecated packages: ${removed.join(', ')}`;
+          }
+
+          return {
+            success: true,
+            output,
+          };
+        }
+
+        case 'fix_standalone_issues':
+        case 'fix_breaking_changes': {
+          const version = step.version || toolParams.version;
+          if (!version) {
+            throw new Error('Breaking changes fix requires version parameter or step version');
+          }
+
+          const result = await applyBreakingChangeFixes(
+            this.context.projectPath,
+            version
+          );
+
+          if (!result.success) {
+            return {
+              success: false,
+              error: result.errors.join('\n'),
+            };
+          }
+
+          let output = result.message;
+          if (result.changes.length > 0) {
+            output += `\n\nChanges:\n${result.changes.map((c) => `  - ${c}`).join('\n')}`;
+          }
+          if (result.warnings.length > 0) {
+            output += `\n\nWarnings:\n${result.warnings.map((w) => `  ⚠️  ${w}`).join('\n')}`;
+          }
+
+          return {
+            success: true,
+            output,
+          };
+        }
+
+        default:
+          throw new Error(`Unknown tool: ${action.toolName}`);
+      }
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Execute an auto-fix action (automatic error fixing)
+   */
+  private async executeAutoFixAction(
+    action: WorkflowAction,
+    step: WorkflowStep
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    // Auto-fix is handled by LLM-fixer or pattern-fixer tools
+    // For now, we'll return success (the actual fixing happens in MCP tool handlers)
+    return {
+      success: true,
+      output: `Auto-fix action ${action.name} will be handled by error detection system`,
+    };
+  }
+
+  /**
+   * Execute a manual action (requires user intervention)
+   */
+  private executeManualAction(
+    action: WorkflowAction
+  ): { success: boolean; output?: string; error?: string } {
+    // Manual actions are just informational
+    return {
+      success: true,
+      output: `Manual action: ${action.description}\nPlease complete this step manually and confirm.`,
+    };
   }
 
   /**
