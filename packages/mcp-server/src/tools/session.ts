@@ -3,6 +3,7 @@
  * Handles session creation, listing, and deletion
  */
 
+import path from 'path';
 import { SessionManager } from '../session/manager.js';
 import { ToolResult, ProgressCallback } from '../types.js';
 
@@ -40,37 +41,74 @@ async function sessionCreate(
   // Check if projectPath was provided
   let projectPath = args.projectPath as string;
 
+  // Log for debugging
+  console.error('[session_create] Received args:', JSON.stringify(args, null, 2));
+  console.error('[session_create] Extracted projectPath:', projectPath);
+
   if (!projectPath) {
-    // No path provided - return helpful error
+    // No path provided - return helpful error with extraction instructions
     return {
       success: false,
       error: 'Missing required parameter: projectPath',
       message: `
-⚠️  Project Path Required
+⚠️  Project Path Required - You MUST Extract It From User's Message
 
-The 'session_create' tool requires the absolute path to your Angular project.
+🔍 CRITICAL ISSUE:
+You called session_create without the required projectPath parameter.
+Received: ${JSON.stringify(args)}
+Expected: An object with a "projectPath" property
 
-📍 How to provide it:
+📋 WHAT YOU NEED TO DO NOW:
+1. Re-read the user's original message
+2. Find the project path in their message
+3. Call this tool again with the path as the projectPath parameter
 
-In your prompt, explicitly mention the full path:
-  "Create a migration session for /Users/siarheiskuratovich/dev/ai/migrations/angmig/current_app"
+✅ CORRECT USAGE EXAMPLES:
 
-Or use the parameter syntax:
-  "Run session_create with projectPath=/Users/siarheiskuratovich/dev/ai/migrations/angmig/current_app"
+Unix/macOS/Linux:
+{
+  "projectPath": "/Users/username/dev/my-angular-app"
+}
 
-💡 Your Angular project path should contain angular.json file.
+Windows:
+{
+  "projectPath": "C:\\\\Users\\\\username\\\\dev\\\\my-angular-app"
+}
+or
+{
+  "projectPath": "C:/Users/username/dev/my-angular-app"
+}
+
+❌ WRONG - What you just did:
+${JSON.stringify(args)}
+
+EXTRACTION PATTERNS:
+
+User message: "migrate angular application (folder /Users/john/projects/my-app) from version 14 to 15"
+→ Extract: /Users/john/projects/my-app
+→ Call: session_create({ "projectPath": "/Users/john/projects/my-app" })
+
+User message: "migrate angular project at C:\\\\dev\\\\my-app from v14 to v15"
+→ Extract: C:\\\\dev\\\\my-app
+→ Call: session_create({ "projectPath": "C:\\\\dev\\\\my-app" })
+
+User message: "help me migrate the app in C:/projects/angular-app"
+→ Extract: C:/projects/angular-app
+→ Call: session_create({ "projectPath": "C:/projects/angular-app" })
       `.trim(),
       details: {
         missingParameter: 'projectPath',
-        expectedFormat: 'Absolute path (e.g., /Users/name/path/to/project)',
-        examplePath: '/Users/siarheiskuratovich/dev/ai/migrations/angmig/current_app',
+        receivedArgs: args,
+        extractionHint: 'Look for path patterns in user message: (folder <path>), at <path>, in <path>. Unix paths start with /, Windows paths start with drive letter (C:, D:, etc.)',
+        expectedFormat: 'Absolute path - Unix: /Users/name/path/to/project, Windows: C:\\\\path\\\\to\\\\project or C:/path/to/project',
+        mustContain: 'angular.json file',
       },
     };
   }
   
   // Validate it's an Angular project
   const fs = await import('fs/promises');
-  const angularJsonPath = `${projectPath}/angular.json`;
+  const angularJsonPath = path.join(projectPath, 'angular.json');
   
   try {
     await fs.access(angularJsonPath);
@@ -91,7 +129,8 @@ The path you provided does not contain an angular.json file:
   2. The directory contains angular.json
   3. You have read permissions
 
-Example: ls -la ${projectPath}/angular.json
+Example (Unix/macOS/Linux): ls -la "${angularJsonPath}"
+Example (Windows): dir "${angularJsonPath}"
       `.trim(),
       details: {
         providedPath: projectPath,

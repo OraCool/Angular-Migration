@@ -29,457 +29,407 @@ import * as sessionTools from './session.js';
 import * as breakingChangesTools from './breaking-changes.js';
 
 /**
- * All available MCP tools
- * Stage-based architecture:
- * - 8 core migration stage tools (pre-migration, v15-v20, post-migration)
- * - 1 optional feature migration tool (standalone)
- * - 4 stage management tools
- * - 4 session management tools (create, list, get, delete)
- * - 4 state management tools
- * - 3 validation tools
- * - 3 package management tools
- * - 2 backup/restore tools
- * - 2 breaking changes tools (fix, list available)
- * Total: 31 tools
- */
-const TOOLS: Tool[] = [
-  // ========================================
-  // CORE MIGRATION STAGE TOOLS (8 task-based tools)
-  // ========================================
-  // NOTE: These tools are registered via registerMigrationTaskTools() using experimental Tasks API
-  // They return immediately with task ID and allow polling for long-running operations (5-10 minutes)
-  // Tool definitions are provided by McpServer.experimental.tasks.registerToolTask()
-  // No definitions needed here - they're automatically added to the tool list
-
-  // ========================================
-  // STAGE MANAGEMENT TOOLS (4 tools)
-  // ========================================
-  {
-    name: 'migration_stage_get_current',
-    description: 'Get current stage information with progress and next step recommendation. If sessionId is not provided, uses the most recent active session.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: { type: 'string', description: 'Session ID (optional - uses most recent session if omitted)' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'migration_stage_skip_to',
-    description: 'Jump to a specific stage by ID (bypasses sequential order validation)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: { type: 'string', description: 'Session ID' },
-        stageId: { type: 'string', description: 'Target stage ID (e.g., "migration_stage_v17")' },
-      },
-      required: ['sessionId', 'stageId'],
-    },
-  },
-  {
-    name: 'migration_stage_get_all',
-    description: 'List all migration stages with status and recommended next action',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: { type: 'string', description: 'Session ID (optional, omit for stage definitions only)' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'migration_stage_validate_node',
-    description: 'Validate Node.js version compatibility (v22 required for Angular 20)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        requiredMajor: { type: 'number', description: 'Required Node.js major version (default: 22)' },
-      },
-      required: [],
-    },
-  },
-
-  // ========================================
-  // SESSION MANAGEMENT TOOLS (4 tools)
-  // ========================================
-  {
-    name: 'session_create',
-    description: 'Create a new migration session for an Angular project. Returns sessionId required by all migration stage tools.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        projectPath: {
-          type: 'string',
-          description: 'Absolute path to Angular project root directory (must contain angular.json). Example: /Users/user1/dev/ai/migrations/project/current_app',
-        },
-      },
-      required: ['projectPath'],
-    },
-  },
-  {
-    name: 'session_list',
-    description: 'List all active migration sessions with their current state and progress',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: 'session_get',
-    description: 'Get detailed information about a specific migration session including current stage and progress. If sessionId is not provided, uses the most recent active session.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID returned from session_create (optional - uses most recent session if omitted)',
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'session_delete',
-    description: 'Delete a migration session and clean up its state',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID to delete',
-        },
-      },
-      required: ['sessionId'],
-    },
-  },
-
-  // ========================================
-  // SUPPORTING TOOLS
-  // ========================================
-
-  // State Management (4 tools)
-  {
-    name: 'state_save_checkpoint',
-    description: 'Save current workflow state as a checkpoint',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID',
-        },
-      },
-      required: ['sessionId'],
-    },
-  },
-  {
-    name: 'state_load_checkpoint',
-    description: 'Load workflow state from a checkpoint',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID',
-        },
-      },
-      required: ['sessionId'],
-    },
-  },
-  {
-    name: 'state_delete_checkpoint',
-    description: 'Delete a saved checkpoint',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID',
-        },
-      },
-      required: ['sessionId'],
-    },
-  },
-  {
-    name: 'state_has_checkpoint',
-    description: 'Check if a checkpoint exists for a session',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID',
-        },
-      },
-      required: ['sessionId'],
-    },
-  },
-
-  // Validation Tools (3 tools)
-  {
-    name: 'validate_project',
-    description: 'Validate Angular project structure and configuration',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        projectPath: {
-          type: 'string',
-          description: 'Path to Angular project',
-        },
-      },
-      required: ['projectPath'],
-    },
-  },
-  {
-    name: 'validate_node_version',
-    description: 'Validate Node.js version compatibility for Angular version',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        angularVersion: {
-          type: 'string',
-          description: 'Angular version to validate against',
-        },
-      },
-      required: ['angularVersion'],
-    },
-  },
-  {
-    name: 'validate_dependencies',
-    description: 'Validate package.json dependencies for compatibility',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        projectPath: {
-          type: 'string',
-          description: 'Path to Angular project',
-        },
-        targetVersion: {
-          type: 'string',
-          description: 'Target Angular version',
-        },
-      },
-      required: ['projectPath', 'targetVersion'],
-    },
-  },
-
-  // Package Management (3 tools)
-  {
-    name: 'packages_get_compatibility',
-    description: 'Get package compatibility matrix for Angular versions',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        angularVersion: {
-          type: 'string',
-          description: 'Angular version (e.g., "20")',
-        },
-      },
-      required: ['angularVersion'],
-    },
-  },
-  {
-    name: 'packages_check_updates',
-    description: 'Check for available package updates',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        projectPath: {
-          type: 'string',
-          description: 'Path to Angular project',
-        },
-      },
-      required: ['projectPath'],
-    },
-  },
-  {
-    name: 'packages_get_breaking_changes',
-    description: 'Get breaking changes for package version upgrades based on package.json',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        projectPath: {
-          type: 'string',
-          description: 'Path to Angular project',
-        },
-        fromVersion: {
-          type: 'string',
-          description: 'Current Angular version (e.g., "14")',
-        },
-        toVersion: {
-          type: 'string',
-          description: 'Target Angular version (e.g., "20")',
-        },
-      },
-      required: ['projectPath', 'fromVersion', 'toVersion'],
-    },
-  },
-
-  // Breaking Changes Tools (2 tools)
-  {
-    name: 'breaking_changes_fix',
-    description: 'Apply automated fixes for Angular version-specific breaking changes. Runs shell scripts that fix common breaking changes for Angular 16, 17, 19, and 20.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Migration session ID (optional - uses most recent session if omitted)',
-        },
-        targetVersion: {
-          type: 'string',
-          description: 'Angular version to fix breaking changes for (e.g., "16", "17", "19", "20")',
-        },
-        dryRun: {
-          type: 'boolean',
-          description: 'If true, shows what would be fixed without making changes (default: false)',
-        },
-      },
-      required: ['targetVersion'],
-    },
-  },
-  {
-    name: 'breaking_changes_list_available',
-    description: 'List all available breaking changes fix scripts and which Angular versions they support',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
-  },
-
-  // Backup and Restore (2 tools)
-  {
-    name: 'migration_backup',
-    description: 'Create a backup of the Angular project (optional, can be done at any time)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID',
-        },
-        backupName: {
-          type: 'string',
-          description: 'Custom backup name (optional, auto-generated if not provided)',
-        },
-        skipNodeModules: {
-          type: 'boolean',
-          description: 'Skip backing up node_modules (default: true, recommended)',
-        },
-        skipGit: {
-          type: 'boolean',
-          description: 'Skip backing up .git directory (default: false, keeps version history)',
-        },
-        skipDist: {
-          type: 'boolean',
-          description: 'Skip backing up dist directory (default: true)',
-        },
-        skipCoverage: {
-          type: 'boolean',
-          description: 'Skip backing up coverage directory (default: true)',
-        },
-      },
-      required: ['sessionId'],
-    },
-  },
-  {
-    name: 'migration_restore',
-    description: 'Restore the Angular project from a backup',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: {
-          type: 'string',
-          description: 'Session ID',
-        },
-        backupPath: {
-          type: 'string',
-          description: 'Absolute path to backup directory (use this OR backupName)',
-        },
-        backupName: {
-          type: 'string',
-          description: 'Backup name from .migration-backups (use this OR backupPath)',
-        },
-        force: {
-          type: 'boolean',
-          description: 'Force restore even if backup metadata is missing (default: false)',
-        },
-        createSafetyBackup: {
-          type: 'boolean',
-          description: 'Create safety backup of current state before restoring (default: true, recommended)',
-        },
-        preserveGit: {
-          type: 'boolean',
-          description: 'Preserve .git directory during restore (default: true)',
-        },
-        reinstallDependencies: {
-          type: 'boolean',
-          description: 'Reinstall node_modules after restore (default: true)',
-        },
-      },
-      required: ['sessionId'],
-    },
-  },
-];
-
-/**
  * Register all tools with the MCP server
- *
- * This function:
- * 1. Registers each traditional tool with McpServer so they appear in tool list
- * 2. Sets up CallToolRequestSchema handler on underlying Server for routing
- * 3. McpServer automatically merges these with task-based tools (8 stage + 30 subtask)
+ * Uses modern registerTool API with Zod schemas for proper parameter validation
  */
 export function registerTools(mcpServer: McpServer, sessionManager: SessionManager): void {
-  // Register each traditional tool with McpServer so they appear in the tool list
-  // This ensures all 20 traditional tools + 38 task-based tools = 58 total tools visible to clients
-  for (const tool of TOOLS) {
-    mcpServer.tool(
-      tool.name,
-      tool.description || 'No description available',
-      tool.inputSchema as any,
-      async (args: any) => {
-        // Create empty progress callback for traditional tools (they don't support streaming yet)
-        const progressCallback: ProgressCallback = () => {};
+  const progressCallback: ProgressCallback = () => {};
 
-        // Route to appropriate handler based on tool name
-        let result: ToolResult;
+  // ========================================
+  // SESSION MANAGEMENT TOOLS
+  // ========================================
+  
+  mcpServer.registerTool(
+    'session_create',
+    {
+      title: 'Create Migration Session',
+      description: `Create a new migration session for an Angular project. Returns sessionId required by all migration stage tools.
 
-        if (tool.name.startsWith('migration_stage_') || tool.name.startsWith('migration_feature_')) {
-          result = await migrationStageTools.handleMigrationStageTool(tool.name, args, sessionManager, progressCallback);
-        } else if (tool.name === 'migration_backup' || tool.name === 'migration_restore') {
-          result = await backupRestoreTools.handleBackupRestoreTool(tool.name, args, sessionManager, progressCallback);
-        } else if (tool.name.startsWith('breaking_changes_')) {
-          result = await breakingChangesTools.handleBreakingChangesTool(tool.name, args, sessionManager, progressCallback);
-        } else if (tool.name.startsWith('session_')) {
-          result = await sessionTools.handleSessionTool(tool.name, args, sessionManager, progressCallback);
-        } else if (tool.name.startsWith('state_')) {
-          result = await stateTools.handleStateTool(tool.name, args, sessionManager, progressCallback);
-        } else if (tool.name.startsWith('validate_')) {
-          result = await validationTools.handleValidationTool(tool.name, args, sessionManager, progressCallback);
-        } else if (tool.name.startsWith('packages_')) {
-          result = await packageTools.handlePackageTool(tool.name, args, sessionManager, progressCallback);
-        } else {
-          throw new Error(`Unknown tool: ${tool.name}`);
-        }
+⚠️  CRITICAL: This tool REQUIRES the projectPath parameter - it cannot work without it!
 
-        // Return result as text (must use literal 'text' type for MCP)
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      }
-    );
-  }
+REQUIRED PARAMETER:
+- projectPath: Absolute path to the Angular project directory (must contain angular.json)
 
-  // Also set up CallToolRequestSchema handler on underlying Server for backward compatibility
+EXTRACTION INSTRUCTIONS FOR AI:
+The user will mention a path in their message. You MUST extract it and provide it as the projectPath parameter.
+
+Common path patterns:
+- "(folder <path>)" → extract: <path>
+- "at <path>" → extract: <path>
+- "in <path>" → extract: <path>
+- Unix/macOS/Linux: "/Users/..." or "/home/..." → extract the full absolute path
+- Windows: "C:\\..." or "C:/..." or "D:\\..." → extract the full absolute path
+
+❌ WRONG - DO NOT DO THIS:
+session_create({})
+
+✅ CORRECT - ALWAYS PROVIDE projectPath:
+session_create({ "projectPath": "/Users/john/myapp" })
+session_create({ "projectPath": "C:/Users/jane/myapp" })
+session_create({ "projectPath": "C:\\\\Users\\\\jane\\\\myapp" })`,
+      inputSchema: {
+        projectPath: z.string().describe('REQUIRED: Absolute path to Angular project root directory. Must contain angular.json file. Extract this from the user\'s message - look for patterns like "(folder /path)", "at /path", "in /path". Examples: /Users/user1/project (Unix/macOS/Linux) or C:\\Users\\user1\\project or C:/Users/user1/project (Windows)'),
+      },
+    },
+    async ({ projectPath }) => {
+      const result = await sessionTools.handleSessionTool('session_create', { projectPath }, sessionManager);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'session_list',
+    {
+      title: 'List Migration Sessions',
+      description: 'List all active migration sessions with their current state and progress',
+      inputSchema: {},
+    },
+    async () => {
+      const result = await sessionTools.handleSessionTool('session_list', {}, sessionManager);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'session_get',
+    {
+      title: 'Get Session Details',
+      description: 'Get detailed information about a specific migration session including current stage and progress. If sessionId is not provided, uses the most recent active session.',
+      inputSchema: {
+        sessionId: z.string().optional().describe('Session ID returned from session_create (optional - uses most recent session if omitted)'),
+      },
+    },
+    async ({ sessionId }) => {
+      const result = await sessionTools.handleSessionTool('session_get', { sessionId }, sessionManager);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'session_delete',
+    {
+      title: 'Delete Migration Session',
+      description: 'Delete a migration session and clean up its state',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID to delete'),
+      },
+    },
+    async ({ sessionId }) => {
+      const result = await sessionTools.handleSessionTool('session_delete', { sessionId }, sessionManager);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ========================================
+  // STAGE MANAGEMENT TOOLS
+  // ========================================
+
+  mcpServer.registerTool(
+    'migration_stage_get_current',
+    {
+      title: 'Get Current Migration Stage',
+      description: 'Get current stage information with progress and next step recommendation. If sessionId is not provided, uses the most recent active session.',
+      inputSchema: {
+        sessionId: z.string().optional().describe('Session ID (optional - uses most recent session if omitted)'),
+      },
+    },
+    async ({ sessionId }) => {
+      const result = await migrationStageTools.handleMigrationStageTool('migration_stage_get_current', { sessionId }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'migration_stage_skip_to',
+    {
+      title: 'Skip to Migration Stage',
+      description: 'Jump to a specific stage by ID (bypasses sequential order validation)',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID'),
+        stageId: z.string().describe('Target stage ID (e.g., "migration_stage_v17")'),
+      },
+    },
+    async ({ sessionId, stageId }) => {
+      const result = await migrationStageTools.handleMigrationStageTool('migration_stage_skip_to', { sessionId, stageId }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'migration_stage_get_all',
+    {
+      title: 'List All Migration Stages',
+      description: 'List all migration stages with status and recommended next action',
+      inputSchema: {
+        sessionId: z.string().optional().describe('Session ID (optional, omit for stage definitions only)'),
+      },
+    },
+    async ({ sessionId }) => {
+      const result = await migrationStageTools.handleMigrationStageTool('migration_stage_get_all', { sessionId }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'migration_stage_validate_node',
+    {
+      title: 'Validate Node.js Version',
+      description: 'Validate Node.js version compatibility (v22 required for Angular 20)',
+      inputSchema: {
+        requiredMajor: z.number().optional().describe('Required Node.js major version (default: 22)'),
+      },
+    },
+    async ({ requiredMajor }) => {
+      const result = await migrationStageTools.handleMigrationStageTool('migration_stage_validate_node', { requiredMajor }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ========================================
+  // STATE MANAGEMENT TOOLS
+  // ========================================
+
+  mcpServer.registerTool(
+    'state_save_checkpoint',
+    {
+      title: 'Save State Checkpoint',
+      description: 'Save current workflow state as a checkpoint',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID'),
+      },
+    },
+    async ({ sessionId }) => {
+      const result = await stateTools.handleStateTool('state_save_checkpoint', { sessionId }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'state_load_checkpoint',
+    {
+      title: 'Load State Checkpoint',
+      description: 'Load workflow state from a checkpoint',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID'),
+      },
+    },
+    async ({ sessionId }) => {
+      const result = await stateTools.handleStateTool('state_load_checkpoint', { sessionId }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'state_delete_checkpoint',
+    {
+      title: 'Delete State Checkpoint',
+      description: 'Delete a saved checkpoint',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID'),
+      },
+    },
+    async ({ sessionId }) => {
+      const result = await stateTools.handleStateTool('state_delete_checkpoint', { sessionId }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'state_has_checkpoint',
+    {
+      title: 'Check Checkpoint Exists',
+      description: 'Check if a checkpoint exists for a session',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID'),
+      },
+    },
+    async ({ sessionId }) => {
+      const result = await stateTools.handleStateTool('state_has_checkpoint', { sessionId }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ========================================
+  // VALIDATION TOOLS
+  // ========================================
+
+  mcpServer.registerTool(
+    'validate_project',
+    {
+      title: 'Validate Angular Project',
+      description: 'Validate Angular project structure and configuration',
+      inputSchema: {
+        projectPath: z.string().describe('Path to Angular project'),
+      },
+    },
+    async ({ projectPath }) => {
+      const result = await validationTools.handleValidationTool('validate_project', { projectPath }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'validate_node_version',
+    {
+      title: 'Validate Node.js Version Compatibility',
+      description: 'Validate Node.js version compatibility for Angular version',
+      inputSchema: {
+        angularVersion: z.string().describe('Angular version to validate against'),
+      },
+    },
+    async ({ angularVersion }) => {
+      const result = await validationTools.handleValidationTool('validate_node_version', { angularVersion }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'validate_dependencies',
+    {
+      title: 'Validate Dependencies',
+      description: 'Validate package.json dependencies for compatibility',
+      inputSchema: {
+        projectPath: z.string().describe('Path to Angular project'),
+        targetVersion: z.string().describe('Target Angular version'),
+      },
+    },
+    async ({ projectPath, targetVersion }) => {
+      const result = await validationTools.handleValidationTool('validate_dependencies', { projectPath, targetVersion }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ========================================
+  // PACKAGE MANAGEMENT TOOLS
+  // ========================================
+
+  mcpServer.registerTool(
+    'packages_get_compatibility',
+    {
+      title: 'Get Package Compatibility Matrix',
+      description: 'Get package compatibility matrix for Angular versions',
+      inputSchema: {
+        angularVersion: z.string().describe('Angular version (e.g., "20")'),
+      },
+    },
+    async ({ angularVersion }) => {
+      const result = await packageTools.handlePackageTool('packages_get_compatibility', { angularVersion }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'packages_check_updates',
+    {
+      title: 'Check Package Updates',
+      description: 'Check for available package updates',
+      inputSchema: {
+        projectPath: z.string().describe('Path to Angular project'),
+      },
+    },
+    async ({ projectPath }) => {
+      const result = await packageTools.handlePackageTool('packages_check_updates', { projectPath }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'packages_get_breaking_changes',
+    {
+      title: 'Get Package Breaking Changes',
+      description: 'Get breaking changes for package version upgrades based on package.json',
+      inputSchema: {
+        projectPath: z.string().describe('Path to Angular project'),
+        fromVersion: z.string().describe('Current Angular version (e.g., "14")'),
+        toVersion: z.string().describe('Target Angular version (e.g., "20")'),
+      },
+    },
+    async ({ projectPath, fromVersion, toVersion }) => {
+      const result = await packageTools.handlePackageTool('packages_get_breaking_changes', { projectPath, fromVersion, toVersion }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ========================================
+  // BREAKING CHANGES TOOLS
+  // ========================================
+
+  mcpServer.registerTool(
+    'breaking_changes_fix',
+    {
+      title: 'Fix Breaking Changes',
+      description: 'Apply automated fixes for Angular version-specific breaking changes. Runs shell scripts that fix common breaking changes for Angular 16, 17, 19, and 20.',
+      inputSchema: {
+        sessionId: z.string().optional().describe('Migration session ID (optional - uses most recent session if omitted)'),
+        targetVersion: z.string().describe('Angular version to fix breaking changes for (e.g., "16", "17", "19", "20")'),
+        dryRun: z.boolean().optional().describe('If true, shows what would be fixed without making changes (default: false)'),
+      },
+    },
+    async ({ sessionId, targetVersion, dryRun }) => {
+      const result = await breakingChangesTools.handleBreakingChangesTool('breaking_changes_fix', { sessionId, targetVersion, dryRun }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'breaking_changes_list_available',
+    {
+      title: 'List Available Breaking Changes Fixes',
+      description: 'List all available breaking changes fix scripts and which Angular versions they support',
+      inputSchema: {},
+    },
+    async () => {
+      const result = await breakingChangesTools.handleBreakingChangesTool('breaking_changes_list_available', {}, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ========================================
+  // BACKUP AND RESTORE TOOLS
+  // ========================================
+
+  mcpServer.registerTool(
+    'migration_backup',
+    {
+      title: 'Create Project Backup',
+      description: 'Create a backup of the Angular project (optional, can be done at any time)',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID'),
+        backupName: z.string().optional().describe('Custom backup name (optional, auto-generated if not provided)'),
+        skipNodeModules: z.boolean().optional().describe('Skip backing up node_modules (default: true, recommended)'),
+        skipGit: z.boolean().optional().describe('Skip backing up .git directory (default: false, keeps version history)'),
+        skipDist: z.boolean().optional().describe('Skip backing up dist directory (default: true)'),
+        skipCoverage: z.boolean().optional().describe('Skip backing up coverage directory (default: true)'),
+      },
+    },
+    async ({ sessionId, backupName, skipNodeModules, skipGit, skipDist, skipCoverage }) => {
+      const result = await backupRestoreTools.handleBackupRestoreTool('migration_backup', { sessionId, backupName, skipNodeModules, skipGit, skipDist, skipCoverage }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'migration_restore',
+    {
+      title: 'Restore Project from Backup',
+      description: 'Restore the Angular project from a backup',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID'),
+        backupPath: z.string().optional().describe('Absolute path to backup directory (use this OR backupName)'),
+        backupName: z.string().optional().describe('Backup name from .migration-backups (use this OR backupPath)'),
+        force: z.boolean().optional().describe('Force restore even if backup metadata is missing (default: false)'),
+        createSafetyBackup: z.boolean().optional().describe('Create safety backup of current state before restoring (default: true, recommended)'),
+        preserveGit: z.boolean().optional().describe('Preserve .git directory during restore (default: true)'),
+        reinstallDependencies: z.boolean().optional().describe('Reinstall node_modules after restore (default: true)'),
+      },
+    },
+    async ({ sessionId, backupPath, backupName, force, createSafetyBackup, preserveGit, reinstallDependencies }) => {
+      const result = await backupRestoreTools.handleBackupRestoreTool('migration_restore', { sessionId, backupPath, backupName, force, createSafetyBackup, preserveGit, reinstallDependencies }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // Set up CallToolRequestSchema handler on underlying Server for backward compatibility
   // This handles any tools that might bypass McpServer's routing
   mcpServer.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args, _meta } = request.params;
@@ -548,6 +498,8 @@ export function registerTools(mcpServer: McpServer, sessionManager: SessionManag
         result = await migrationStageTools.handleMigrationStageTool(name, toolArgs, sessionManager, progressCallback);
       } else if (name === 'migration_backup' || name === 'migration_restore') {
         result = await backupRestoreTools.handleBackupRestoreTool(name, toolArgs, sessionManager, progressCallback);
+      } else if (name.startsWith('breaking_changes_')) {
+        result = await breakingChangesTools.handleBreakingChangesTool(name, toolArgs, sessionManager, progressCallback);
       } else if (name.startsWith('session_')) {
         result = await sessionTools.handleSessionTool(name, toolArgs, sessionManager, progressCallback);
       } else if (name.startsWith('state_')) {

@@ -20,6 +20,14 @@ function getResources(sessionManager: SessionManager): Resource[] {
   const sessions = sessionManager.listSessions();
 
   const resources: Resource[] = [
+    // AI Assistant Usage Guide - teaches how to extract parameters from natural language
+    {
+      uri: 'migration://usage-guide',
+      name: '🤖 AI Assistant Usage Guide',
+      description: 'IMPORTANT: How to extract parameters from natural language migration requests',
+      mimeType: 'text/markdown',
+    },
+
     // Static documentation resources
     {
       uri: 'migration://docs/overview',
@@ -124,7 +132,9 @@ export function registerResources(
     try {
       let content: string;
 
-      if (uri === 'migration://docs/overview') {
+      if (uri === 'migration://usage-guide') {
+        content = getUsageGuide();
+      } else if (uri === 'migration://docs/overview') {
         content = getOverviewDoc();
       } else if (uri === 'migration://docs/workflow') {
         content = JSON.stringify(getWorkflowDoc(), null, 2);
@@ -435,4 +445,386 @@ function getBreakingChangesForVersion(version: string) {
       `Visit https://update.angular.io for interactive migration guide`,
     ],
   };
+}
+
+/**
+ * Generate AI Assistant Usage Guide
+ * This teaches AI assistants how to extract parameters from natural language
+ */
+function getUsageGuide(): string {
+  return `# 🤖 Angular Migration MCP Server - AI Assistant Guide
+
+## CRITICAL: Parameter Extraction from Natural Language
+
+When users give natural language migration commands like:
+- "migrate angular application (folder /path/to/project) from version 14 to 15"
+- "upgrade my app at /Users/john/myapp from Angular 16 to 20"
+- "start migration for project in C:\\dev\\angular-app"
+- "migrate the app at C:/Users/jane/projects/my-app to version 18"
+
+**YOU MUST EXTRACT AND PROVIDE ALL REQUIRED PARAMETERS EXPLICITLY**.
+
+### ❌ WRONG - Do NOT pass empty objects:
+
+\`\`\`
+session_create with arguments: {}
+\`\`\`
+
+### ✅ CORRECT - Extract path from user's message:
+
+Unix/macOS/Linux:
+\`\`\`
+session_create with arguments: {
+  "projectPath": "/Users/siarheiskuratovich/dev/ai/migrations/angmig/current_app"
+}
+\`\`\`
+
+Windows:
+\`\`\`
+session_create with arguments: {
+  "projectPath": "C:\\\\Users\\\\username\\\\dev\\\\my-angular-app"
+}
+\`\`\`
+or
+\`\`\`
+session_create with arguments: {
+  "projectPath": "C:/Users/username/dev/my-angular-app"
+}
+\`\`\`
+
+---
+
+## Parameter Extraction Patterns
+
+### Pattern 1: Folder/Directory in Parentheses
+**User says**: "migrate angular application (folder /path/to/app) from v14 to v15"
+
+**Extract**:
+- projectPath: "/path/to/app"
+- fromVersion: "14"
+- toVersion: "15"
+
+**Windows example**: "migrate app (folder C:\\\\projects\\\\myapp) from v14 to v15"
+**Extract**: projectPath: "C:\\\\projects\\\\myapp"
+
+### Pattern 2: "at" or "in" Keywords
+**User says**: "upgrade my Angular project at /home/user/myapp to version 20"
+
+**Extract**:
+- projectPath: "/home/user/myapp"
+- toVersion: "20"
+
+**Windows example**: "upgrade project at C:/dev/angular-app to version 20"
+**Extract**: projectPath: "C:/dev/angular-app"
+
+### Pattern 3: Explicit Path Statement
+**User says**: "start migration for /Users/dev/angular-project, target is Angular 17"
+
+**Extract**:
+- projectPath: "/Users/dev/angular-project"
+- toVersion: "17"
+
+**Windows example**: "start migration for D:\\\\workspace\\\\angular-app, target is Angular 17"
+**Extract**: projectPath: "D:\\\\workspace\\\\angular-app"
+
+### Pattern 4: Current Directory Reference
+**User says**: "migrate the current directory from Angular 15 to 16"
+
+**Extract**:
+- projectPath: [Use process.cwd() or ask user for explicit path]
+- fromVersion: "15"
+- toVersion: "16"
+
+---
+
+## Complete Migration Workflow
+
+When a user requests a full migration, follow these steps **IN ORDER**:
+
+### Step 1: Extract Parameters from User Request
+
+From: "migrate angular application (folder /path/to/app) from version 14 to version 15"
+
+Extract:
+- **projectPath**: "/path/to/app"
+- **fromVersion**: "14"
+- **toVersion**: "15"
+
+### Step 2: Create Migration Session
+
+\`\`\`
+Tool: session_create
+Arguments: {
+  "projectPath": "/path/to/app"
+}
+\`\`\`
+
+Response will include: \`{ "sessionId": "mcp-xyz123", ... }\`
+
+**SAVE THIS SESSION ID** for all subsequent steps.
+
+### Step 3: Validate Prerequisites
+
+\`\`\`
+Tool: migration_stage_validate_node
+Arguments: {}
+\`\`\`
+
+This checks Node.js v22 requirement.
+
+### Step 4: Run Pre-Migration Stage
+
+\`\`\`
+Tool: migration_stage_pre_migration
+Arguments: {
+  "sessionId": "mcp-xyz123"
+}
+\`\`\`
+
+This is a **task-based tool** - it returns immediately with a task ID. Monitor progress.
+
+### Step 5: Run Version Upgrade
+
+For Angular 14 → 15:
+
+\`\`\`
+Tool: migration_stage_v15
+Arguments: {
+  "sessionId": "mcp-xyz123"
+}
+\`\`\`
+
+**Wait for completion**. The success message will say:
+
+> 📋 Next Step: Apply breaking changes fixes for Angular 15
+> Use tool: breaking_changes_fix with targetVersion: "15"
+
+### Step 6: Apply Breaking Changes Fixes
+
+\`\`\`
+Tool: breaking_changes_fix
+Arguments: {
+  "sessionId": "mcp-xyz123",
+  "targetVersion": "15"
+}
+\`\`\`
+
+This runs automated fix scripts for Angular 15 breaking changes.
+
+### Step 7: Run Post-Migration Validation
+
+\`\`\`
+Tool: migration_stage_post_migration
+Arguments: {
+  "sessionId": "mcp-xyz123"
+}
+\`\`\`
+
+This validates the migration succeeded.
+
+---
+
+## Common User Request Patterns
+
+### Pattern: "Migrate from X to Y"
+
+**User**: "migrate angular application (folder /path) from version 14 to version 15"
+
+**Your Action**:
+1. Extract: projectPath="/path", fromVersion="14", toVersion="15"
+2. Call \`session_create\` with projectPath
+3. Get sessionId from response
+4. Call \`migration_stage_pre_migration\` with sessionId
+5. Call \`migration_stage_v15\` with sessionId
+6. Call \`breaking_changes_fix\` with sessionId and targetVersion="15"
+7. Call \`migration_stage_post_migration\` with sessionId
+
+### Pattern: "What should I do next?"
+
+**User**: "what's next for my migration?"
+
+**Your Action**:
+1. Call \`session_list\` to find most recent session
+2. Call \`migration_stage_get_current\` with sessionId
+3. Read the \`nextAction\` field
+4. Execute the recommended tool
+
+### Pattern: "Check migration status"
+
+**User**: "check the status of my migration"
+
+**Your Action**:
+1. Call \`session_list\`
+2. Call \`migration_stage_get_all\` with most recent sessionId
+3. Show user which stages are completed, in-progress, or pending
+
+---
+
+## Tool Parameter Requirements
+
+### session_create
+**REQUIRED**:
+- \`projectPath\` (string): Absolute path to Angular project root
+
+**Example**:
+\`\`\`json
+{
+  "projectPath": "/Users/siarheiskuratovich/dev/ai/migrations/angmig/current_app"
+}
+\`\`\`
+
+### All migration_stage_* tools
+**REQUIRED**:
+- \`sessionId\` (string): Session ID from session_create
+
+**Example**:
+\`\`\`json
+{
+  "sessionId": "mcp-abc123"
+}
+\`\`\`
+
+### breaking_changes_fix
+**REQUIRED**:
+- \`targetVersion\` (string): Angular version to fix (e.g., "15", "16", "17", "19", "20")
+
+**OPTIONAL**:
+- \`sessionId\` (string): Session ID (uses most recent if omitted)
+- \`dryRun\` (boolean): Preview changes without applying (default: false)
+
+**Example**:
+\`\`\`json
+{
+  "sessionId": "mcp-abc123",
+  "targetVersion": "15",
+  "dryRun": false
+}
+\`\`\`
+
+---
+
+## Error Handling
+
+### Error: "Missing required parameter: projectPath"
+
+**Cause**: You passed \`{}\` or omitted projectPath
+
+**Fix**: Extract path from user's message and provide it explicitly:
+
+\`\`\`json
+{
+  "projectPath": "/extracted/path/from/user/message"
+}
+\`\`\`
+
+### Error: "Session not found"
+
+**Cause**: Invalid sessionId or session was deleted
+
+**Fix**:
+1. Call \`session_list\` to see active sessions
+2. Use a valid sessionId or create a new session
+
+### Error: "Node.js version mismatch"
+
+**Cause**: User doesn't have Node.js v22 installed
+
+**Fix**: Tell user to install Node.js v22:
+- macOS/Linux: \`nvm install 22 && nvm use 22\`
+- Windows: Download from https://nodejs.org
+
+---
+
+## Best Practices
+
+### ✅ DO:
+- Extract ALL parameters from user's natural language input
+- Use absolute paths (not relative)
+- Save sessionId from session_create response
+- Follow the recommended next action from each stage
+- Check stage status before proceeding
+- Run breaking_changes_fix after each version upgrade
+
+### ❌ DON'T:
+- Pass empty objects \`{}\` when parameters are required
+- Guess paths - extract from user's message or ask
+- Skip pre-migration stage (it creates backups!)
+- Skip breaking changes fixes (they prevent build errors)
+- Run multiple stages in parallel (they're sequential)
+
+---
+
+## Quick Reference
+
+**Start migration**: session_create → migration_stage_pre_migration → migration_stage_v{X}
+**After upgrade**: breaking_changes_fix
+**Check status**: migration_stage_get_current
+**List all stages**: migration_stage_get_all
+**Validate Node.js**: migration_stage_validate_node
+**Final validation**: migration_stage_post_migration
+
+---
+
+## Example Complete Flow
+
+### Example 1: Unix/macOS/Linux
+User says: "migrate angular application (folder /Users/john/myapp) from version 14 to version 15"
+
+Your exact steps:
+
+\`\`\`javascript
+// Step 1: Create session
+session_create({ projectPath: "/Users/john/myapp" })
+// Response: { sessionId: "mcp-xyz", ... }
+
+// Step 2: Validate Node.js
+migration_stage_validate_node({})
+// Response: { success: true, version: "v22.11.0" }
+
+// Step 3: Pre-migration
+migration_stage_pre_migration({ sessionId: "mcp-xyz" })
+// Task created - wait for completion
+\`\`\`
+
+### Example 2: Windows
+User says: "migrate the app at C:\\\\dev\\\\my-angular-app from v16 to v17"
+
+Your exact steps:
+
+\`\`\`javascript
+// Step 1: Create session (note: use forward slashes or escaped backslashes)
+session_create({ projectPath: "C:\\\\dev\\\\my-angular-app" })
+// or
+session_create({ projectPath: "C:/dev/my-angular-app" })
+// Response: { sessionId: "mcp-abc", ... }
+
+// Step 2: Validate Node.js
+migration_stage_validate_node({})
+// Response: { success: true, version: "v22.11.0" }
+
+// Step 3: Pre-migration
+migration_stage_pre_migration({ sessionId: "mcp-abc" })
+// Task created - wait for completion
+
+// Step 4: Upgrade to v15
+migration_stage_v15({ sessionId: "mcp-xyz" })
+// Task created - wait for completion
+// Response includes: "Next Step: Apply breaking changes fixes for Angular 15"
+
+// Step 5: Fix breaking changes
+breaking_changes_fix({ 
+  sessionId: "mcp-xyz",
+  targetVersion: "15"
+})
+// Response: { success: true, filesModified: [...] }
+
+// Step 6: Post-migration validation
+migration_stage_post_migration({ sessionId: "mcp-xyz" })
+// Task created - validates everything succeeded
+\`\`\`
+
+---
+
+**Remember**: Always extract parameters explicitly. Never pass empty objects when parameters are required!
+`;
 }

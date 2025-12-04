@@ -9,7 +9,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { execSync, spawn } from 'child_process';
-import { detectPackageManager } from './package-manager.js';
+import { detectPackageManager, cleanPackages } from './package-manager.js';
 import type { ProgressCallback } from '../types/index.js';
 
 // ES modules compatibility: resolve __dirname
@@ -491,43 +491,55 @@ export async function updatePackages(
         });
       }
 
-      // Step 5: Remove package-lock.json for clean install
-      const packageLockPath = path.join(projectPath, 'package-lock.json');
-      if (fs.existsSync(packageLockPath)) {
-        if (progressCallback) {
-          progressCallback({
-            message: '🗑️  Removing package-lock.json for clean install...',
-            type: 'info',
-            timestamp: new Date().toISOString(),
-          });
-        }
+      // Step 5: Save package.json to version control (optional git commit happens in workflow)
+      const gitMsg = '📝 package.json ready for clean install';
+      console.log(gitMsg);
+      logs.push(gitMsg);
 
-        fs.unlinkSync(packageLockPath);
-        console.log('🗑️  Removed package-lock.json');
+      // Step 6: Clean node_modules and lock files before install
+      const cleanMsg = '🧹 Cleaning node_modules and lock files...';
+      console.log(cleanMsg);
+      logs.push(cleanMsg);
 
-        if (progressCallback) {
-          progressCallback({
-            message: '✅ package-lock.json removed',
-            type: 'success',
-            timestamp: new Date().toISOString(),
-          });
-        }
+      if (progressCallback) {
+        progressCallback({
+          message: cleanMsg,
+          type: 'info',
+          timestamp: new Date().toISOString(),
+        });
       }
 
-      // Step 6: Detect package manager and install packages with streaming
+      // Remove node_modules and lock files for clean install
+      const cleanResult = await cleanPackages({
+        projectPath,
+        removeNodeModules: true,
+        removeLockFile: true,
+        reinstall: false, // We'll install manually with progress tracking
+      });
+
+      if (!cleanResult.success) {
+        throw new Error(`Failed to clean packages: ${cleanResult.error}`);
+      }
+
+      const cleanedMsg = `✅ Cleaned: ${cleanResult.details?.nodeModulesRemoved ? 'node_modules' : ''} ${cleanResult.details?.lockFileRemoved ? 'lock file' : ''}`;
+      console.log(cleanedMsg);
+      logs.push(cleanedMsg);
+
+      if (progressCallback) {
+        progressCallback({
+          message: cleanedMsg,
+          type: 'success',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Step 7: Detect package manager and install packages with streaming
       const packageManager = detectPackageManager(projectPath);
 
       // Log the exact directory where we'll run npm install
       const dirMsg = `📁 Working directory: ${projectPath}`;
       console.log(dirMsg);
       logs.push(dirMsg);
-
-      // Check if node_modules exists before install
-      const nodeModulesPath = path.join(projectPath, 'node_modules');
-      const beforeExists = fs.existsSync(nodeModulesPath);
-      const beforeMsg = `📦 node_modules before install: ${beforeExists ? 'EXISTS' : 'DOES NOT EXIST'}`;
-      console.log(beforeMsg);
-      logs.push(beforeMsg);
 
       const installMsg = `\n📦 Installing packages using ${packageManager.type}...`;
       console.log(installMsg);
@@ -536,6 +548,9 @@ export async function updatePackages(
       const runMsg = `Running: ${packageManager.installCommand} in ${projectPath}`;
       console.log(runMsg);
       logs.push(runMsg);
+
+      // Define nodeModulesPath for before/after checks
+      const nodeModulesPath = path.join(projectPath, 'node_modules');
 
       // Use streaming installation with progress updates
       const installResult = await installPackagesWithProgress(
@@ -581,9 +596,16 @@ export async function updatePackages(
 
     const duration = Date.now() - startTime;
     const summaryMsg = `Successfully updated ${changes.length} packages to Angular ${targetVersion} compatible versions`;
+    
+    // Add breaking changes suggestion for versions that have automated fixes available
+    const versionsWithBreakingChangesFixes = ['15', '16', '17', '19', '20'];
+    const nextStepHint = versionsWithBreakingChangesFixes.includes(targetVersion)
+      ? `\n\n📋 Next Step: Apply breaking changes fixes for Angular ${targetVersion}\n   Use: breaking_changes_fix tool with version=${targetVersion}`
+      : '';
+    
     const fullMessage = logs.length > 0
-      ? `${summaryMsg}\n\n${logs.join('\n')}`
-      : summaryMsg;
+      ? `${summaryMsg}${nextStepHint}\n\n${logs.join('\n')}`
+      : `${summaryMsg}${nextStepHint}`;
 
     return {
       success: true,

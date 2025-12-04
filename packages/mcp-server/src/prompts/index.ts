@@ -96,6 +96,27 @@ const PROMPTS: Prompt[] = [
       },
     ],
   },
+  {
+    name: 'start-migration',
+    description: 'Step-by-step guide to start an Angular migration workflow from natural language request',
+    arguments: [
+      {
+        name: 'projectPath',
+        description: 'Absolute path to the Angular project (extract from user request)',
+        required: true,
+      },
+      {
+        name: 'fromVersion',
+        description: 'Current Angular version (extract from user request, e.g., "14")',
+        required: true,
+      },
+      {
+        name: 'toVersion',
+        description: 'Target Angular version (extract from user request, e.g., "15")',
+        required: true,
+      },
+    ],
+  },
 ];
 
 /**
@@ -132,6 +153,9 @@ export function registerPrompts(
           break;
         case 'review-breaking-changes':
           messages = await getReviewBreakingChangesPrompt(args);
+          break;
+        case 'start-migration':
+          messages = await getStartMigrationPrompt(args);
           break;
         default:
           throw new Error(`Unknown prompt: ${name}`);
@@ -412,6 +436,177 @@ Provide:
 6. **Quick Wins**: Easy fixes that can be done first
 
 Make the review comprehensive yet actionable. Focus on helping the developer understand WHAT needs to change and WHY.`,
+      },
+    },
+  ];
+}
+
+/**
+ * Generate start migration workflow prompt
+ */
+async function getStartMigrationPrompt(
+  args: Record<string, string> | undefined
+): Promise<Array<{ role: 'user' | 'assistant'; content: { type: 'text'; text: string } }>> {
+  const projectPath = args?.projectPath;
+  const fromVersion = args?.fromVersion;
+  const toVersion = args?.toVersion;
+
+  if (!projectPath || !fromVersion || !toVersion) {
+    throw new Error('projectPath, fromVersion, and toVersion arguments are required');
+  }
+
+  return [
+    {
+      role: 'user',
+      content: {
+        type: 'text',
+        text: `Start Angular migration workflow for:
+
+**Project Path**: ${projectPath}
+**From Version**: Angular ${fromVersion}
+**To Version**: Angular ${toVersion}
+
+## Required Steps (Execute in Order)
+
+### Step 1: Create Migration Session
+First, create a migration session to track progress:
+
+\`\`\`
+Tool: session_create
+Arguments:
+{
+  "projectPath": "${projectPath}"
+}
+\`\`\`
+
+This will return a \`sessionId\` - save it for subsequent steps.
+
+### Step 2: Validate Prerequisites
+Before starting migration, validate the environment:
+
+\`\`\`
+Tool: migration_stage_validate_node
+Arguments: {} (uses default Node.js v22 requirement)
+\`\`\`
+
+### Step 3: Start Pre-Migration Stage
+Run pre-migration validation and setup:
+
+\`\`\`
+Tool: migration_stage_pre_migration
+Arguments:
+{
+  "sessionId": "<sessionId from Step 1>"
+}
+\`\`\`
+
+**Note**: This is a long-running task. It will:
+- Return immediately with a task ID
+- Validate project structure
+- Check Angular version
+- Create backup
+- Run initial tests
+
+Monitor task progress with the returned task ID.
+
+### Step 4: Upgrade to Angular ${toVersion}
+After pre-migration completes successfully, run the version upgrade:
+
+\`\`\`
+Tool: migration_stage_v${toVersion}
+Arguments:
+{
+  "sessionId": "<sessionId from Step 1>"
+}
+\`\`\`
+
+**This will**:
+1. Update package.json to Angular ${toVersion} compatible versions
+2. Run \`npm install\`
+3. Run \`ng update @angular/core@${toVersion} @angular/cli@${toVersion} --migrate-only\`
+4. Run \`ng update @angular/material@${toVersion} --migrate-only\`
+5. Apply automated schematics
+6. Build the project
+7. Run tests
+
+**Important**: After this completes, the success message will suggest:
+\`\`\`
+📋 Next Step: Apply breaking changes fixes for Angular ${toVersion}
+Use tool: breaking_changes_fix with targetVersion: "${toVersion}"
+\`\`\`
+
+### Step 5: Apply Breaking Changes Fixes
+Fix Angular ${toVersion} specific breaking changes:
+
+\`\`\`
+Tool: breaking_changes_fix
+Arguments:
+{
+  "sessionId": "<sessionId from Step 1>",
+  "targetVersion": "${toVersion}"
+}
+\`\`\`
+
+**This will**:
+- Run automated fix scripts for common breaking changes
+- Update deprecated API usage
+- Fix type errors
+- Apply code transformations
+
+### Step 6: Post-Migration Validation
+Finally, run comprehensive validation:
+
+\`\`\`
+Tool: migration_stage_post_migration
+Arguments:
+{
+  "sessionId": "<sessionId from Step 1>"
+}
+\`\`\`
+
+**This will**:
+- Run full test suite
+- Validate build
+- Check for deprecation warnings
+- Generate migration report
+
+## Incremental Migration Path
+If migrating multiple versions (e.g., ${fromVersion} → ${toVersion}):
+
+**Recommended**: Upgrade incrementally:
+${Array.from({ length: parseInt(toVersion) - parseInt(fromVersion) }, (_, i) => {
+  const version = parseInt(fromVersion) + i + 1;
+  return `${i + 1}. Angular ${fromVersion} → ${version} (use migration_stage_v${version})`;
+}).join('\n')}
+
+**Each version upgrade follows the same pattern**:
+1. Run migration_stage_v{version}
+2. Run breaking_changes_fix with targetVersion: "{version}"
+3. Verify build and tests pass
+4. Proceed to next version
+
+## Monitoring Progress
+During execution:
+- Check stage status: \`migration_stage_get_current\`
+- View all stages: \`migration_stage_get_all\`
+- Get session details: \`session_get\`
+
+## Error Recovery
+If a stage fails:
+1. Check the error message in task result
+2. Use \`troubleshoot-error\` prompt for guidance
+3. Fix the issue manually
+4. Retry the same stage or skip to next stage with \`migration_stage_skip_to\`
+
+## Success Criteria
+Migration is complete when:
+- ✅ All migration stages show "completed" status
+- ✅ Build succeeds without errors
+- ✅ All tests pass
+- ✅ No critical deprecation warnings
+- ✅ Application runs correctly
+
+Execute these steps in order to complete your Angular ${fromVersion} → ${toVersion} migration.`,
       },
     },
   ];

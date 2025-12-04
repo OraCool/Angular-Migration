@@ -5,18 +5,25 @@
 
 import { SessionManager } from '../session/manager.js';
 import { ToolResult, ProgressCallback } from '../types.js';
-import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  fixAngular15BreakingChanges,
+  fixAngular16BreakingChanges,
+  fixAngular17BreakingChanges,
+  fixAngular19BreakingChanges,
+  fixAngular20BreakingChanges,
+  type BreakingChangesFixer
+} from 'angular-migration-acp-agent/breaking-changes';
 
 /**
- * Map of Angular versions to their breaking changes fix scripts
+ * Map of Angular versions to their breaking changes fix functions
+ * Cross-platform TypeScript implementations (Windows, macOS, Linux)
  */
-const BREAKING_CHANGES_SCRIPTS: Record<string, string> = {
-  '16': 'fix-angular-16-breaking-changes.sh',
-  '17': 'fix-angular-17-breaking-changes.sh',
-  '19': 'fix-angular-19-breaking-changes.sh',
-  '20': 'fix-angular-20-breaking-changes.sh',
+const BREAKING_CHANGES_FIXERS: Record<string, BreakingChangesFixer> = {
+  '15': fixAngular15BreakingChanges,
+  '16': fixAngular16BreakingChanges,
+  '17': fixAngular17BreakingChanges,
+  '19': fixAngular19BreakingChanges,
+  '20': fixAngular20BreakingChanges,
 };
 
 /**
@@ -77,66 +84,37 @@ async function fixBreakingChanges(
       success: false,
       error: 'Missing required parameter: targetVersion',
       details: {
-        availableVersions: Object.keys(BREAKING_CHANGES_SCRIPTS),
+        availableVersions: Object.keys(BREAKING_CHANGES_FIXERS),
       },
       nextStep: {
         action: 'Specify target version',
-        description: 'Provide the Angular version for which to apply breaking changes fixes (e.g., "16", "17", "19", "20")',
+        description: 'Provide the Angular version for which to apply breaking changes fixes (e.g., "15", "16", "17", "19", "20")',
         reasoning: 'Different Angular versions have different breaking changes that require specific fixes',
       },
     };
   }
 
-  // Check if script exists for this version
-  const scriptName = BREAKING_CHANGES_SCRIPTS[targetVersion];
-  if (!scriptName) {
+  // Check if fixer exists for this version
+  const fixer = BREAKING_CHANGES_FIXERS[targetVersion];
+  if (!fixer) {
     return {
       success: false,
-      error: `No breaking changes fix script available for Angular ${targetVersion}`,
+      error: `No breaking changes fix available for Angular ${targetVersion}`,
       details: {
         requestedVersion: targetVersion,
-        availableVersions: Object.keys(BREAKING_CHANGES_SCRIPTS),
+        availableVersions: Object.keys(BREAKING_CHANGES_FIXERS),
       },
-      message: `Breaking changes fixes are available for: ${Object.keys(BREAKING_CHANGES_SCRIPTS).join(', ')}`,
+      message: `Breaking changes fixes are available for: ${Object.keys(BREAKING_CHANGES_FIXERS).join(', ')}`,
       nextStep: {
         action: 'Use available version',
         description: 'Choose one of the available Angular versions',
-        reasoning: `Angular ${targetVersion} either doesn't have breaking changes or the fix script hasn't been created yet`,
+        reasoning: `Angular ${targetVersion} either doesn't have breaking changes or the fix hasn't been implemented yet`,
       },
     };
   }
 
   const context = session.engine.getContext();
   const projectPath = context.projectPath;
-
-  // Find the script in the workspace
-  const scriptPath = resolve(
-    __dirname,
-    '../../../acp-agent/scripts',
-    scriptName
-  );
-
-  if (!existsSync(scriptPath)) {
-    return {
-      success: false,
-      error: `Breaking changes fix script not found: ${scriptName}`,
-      details: {
-        expectedPath: scriptPath,
-        scriptName,
-      },
-      troubleshooting: {
-        likelyCause: 'Script file missing or workspace structure changed',
-        suggestedFixes: [
-          'Verify the acp-agent package is properly installed',
-          `Check if script exists at: ${scriptPath}`,
-          'Rebuild the workspace: npm install',
-        ],
-        relatedDocs: [],
-        canRetry: false,
-        canRollback: false,
-      },
-    };
-  }
 
   try {
     if (progressCallback) {
@@ -148,40 +126,57 @@ async function fixBreakingChanges(
       });
     }
 
-    // Execute the fix script
-    const command = dryRun
-      ? `bash "${scriptPath}" "${projectPath}" --dry-run`
-      : `bash "${scriptPath}" "${projectPath}"`;
+    console.error(`[Breaking Changes] Running fixes for Angular ${targetVersion} in ${projectPath}`);
 
-    console.error(`[Breaking Changes] Executing: ${command}`);
-
-    const output = execSync(command, {
-      cwd: projectPath,
-      encoding: 'utf-8',
-      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-    });
+    // Execute the TypeScript fixer function
+    const result = await fixer(projectPath);
 
     if (progressCallback) {
       progressCallback({
-        message: `Successfully applied Angular ${targetVersion} breaking changes fixes`,
-        type: 'success',
+        message: result.success 
+          ? `Successfully applied Angular ${targetVersion} breaking changes` 
+          : `Failed to apply Angular ${targetVersion} breaking changes`,
+        type: result.success ? 'success' : 'error',
         progress: 100,
         timestamp: new Date().toISOString(),
       });
+    }
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.message,
+        details: {
+          version: targetVersion,
+          projectPath,
+          fixerDetails: result.details,
+          warnings: result.warnings,
+          errors: result.errors,
+        },
+        troubleshooting: {
+          likelyCause: 'Fix execution failed or project structure issues',
+          suggestedFixes: [
+            'Check the error details above for specific issues',
+            'Verify the project structure is valid Angular project',
+            'Check that all files are readable/writable',
+            ...result.errors.slice(0, 3),
+          ],
+          relatedDocs: [],
+          canRetry: true,
+          canRollback: false,
+        },
+      };
     }
 
     return {
       success: true,
       data: {
         version: targetVersion,
-        scriptExecuted: scriptName,
         projectPath,
-        dryRun: dryRun || false,
-        output: output.trim(),
+        details: result.details,
+        warnings: result.warnings,
       },
-      message: dryRun
-        ? `[DRY RUN] Breaking changes fixes for Angular ${targetVersion} would be applied`
-        : `Successfully applied breaking changes fixes for Angular ${targetVersion}`,
+      message: result.message,
       nextStep: {
         action: 'Review changes and test',
         description: 'Review the applied fixes and run tests to verify everything works',
@@ -190,7 +185,6 @@ async function fixBreakingChanges(
     };
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    const errorOutput = error.stdout || error.stderr || '';
 
     if (progressCallback) {
       progressCallback({
@@ -205,17 +199,16 @@ async function fixBreakingChanges(
       error: `Failed to apply breaking changes fixes for Angular ${targetVersion}`,
       details: {
         version: targetVersion,
-        scriptPath,
+        projectPath,
         errorMessage,
-        output: errorOutput,
       },
       troubleshooting: {
-        likelyCause: 'Script execution failed or project structure issues',
+        likelyCause: 'Unexpected error during fix execution',
         suggestedFixes: [
-          'Check the error output for specific issues',
-          'Verify the project structure is valid',
-          'Try running in dry-run mode first: dryRun: true',
-          `Manually run: bash ${scriptPath} ${projectPath}`,
+          'Check the error message above',
+          'Verify the project path is correct',
+          'Ensure TypeScript compilation is working',
+          'Check file permissions in the project',
         ],
         relatedDocs: [],
         canRetry: true,
@@ -226,13 +219,12 @@ async function fixBreakingChanges(
 }
 
 /**
- * List all available breaking changes fix scripts
+ * List all available breaking changes fix implementations
  */
 async function listAvailableFixes(): Promise<ToolResult> {
-  const fixes = Object.entries(BREAKING_CHANGES_SCRIPTS).map(([version, script]) => ({
+  const fixes = Object.keys(BREAKING_CHANGES_FIXERS).map((version) => ({
     version,
-    script,
-    description: `Fixes for Angular ${version} breaking changes`,
+    description: `Cross-platform fixes for Angular ${version} breaking changes`,
   }));
 
   return {
@@ -241,7 +233,7 @@ async function listAvailableFixes(): Promise<ToolResult> {
       availableFixes: fixes,
       count: fixes.length,
     },
-    message: `${fixes.length} breaking changes fix scripts available`,
+    message: `${fixes.length} breaking changes fix implementations available`,
     nextStep: {
       action: 'breaking_changes_fix',
       description: 'Apply fixes for a specific version using breaking_changes_fix tool',
