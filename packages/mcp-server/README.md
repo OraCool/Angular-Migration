@@ -9,12 +9,19 @@ A Model Context Protocol (MCP) server for automated Angular 14→20 migration wi
 - **1 Optional Feature**: Standalone components migration (can run anytime after v15)
 - **4 Stage Management Tools**: Get current stage, skip to stage, list all stages, validate Node version
 
+### 🔑 Session Management (4 Tools)
+- **Create Session**: Initialize migration session for a project (returns `sessionId`)
+- **List Sessions**: View all active migration sessions
+- **Get Session**: Check detailed status and progress
+- **Delete Session**: Clean up completed or abandoned sessions
+
+> **Note**: All migration stage tools require a `sessionId`. Always create a session first using `session_create`.
+
 ### 🛠️ Supporting Tools (13 Tools)
 - **State Management** (4): Save/load/delete checkpoints, check if checkpoint exists
 - **Validation** (3): Validate project structure, Node version, dependencies
 - **Package Management** (3): Get compatibility matrix, check updates, get breaking changes
 - **Backup/Restore** (2): Create and restore project backups
-- **Git Commit** (1): Commit changes with automated messages
 
 ### ✨ Key Capabilities
 - **Cross-Platform Support**: Works on Windows (PowerShell), macOS, and Linux (bash)
@@ -25,7 +32,11 @@ A Model Context Protocol (MCP) server for automated Angular 14→20 migration wi
 
 ## Prerequisites
 
-- **Node.js v22.x** (required for Angular 20)
+### ⚠️ Critical Requirement: Node.js v22
+
+**You MUST have Node.js v22.x installed before using this tool.**
+
+- **Node.js v22.x** ← **REQUIRED** (Angular 20 will not work with other versions)
 - **npm or yarn** for package management
 - An Angular 14+ project to migrate
 - One of the following MCP clients:
@@ -33,6 +44,10 @@ A Model Context Protocol (MCP) server for automated Angular 14→20 migration wi
   - VS Code with MCP extension
   - Claude Desktop
   - Any MCP-compatible client
+
+> **🛑 Blocking Behavior**: If you attempt to run migration tools with the wrong Node.js version, they will **immediately stop** and display an error with installation instructions. This cannot be bypassed - it's a hard requirement.
+>
+> **📖 See**: [Node.js Version Requirements](./docs/NODE_VERSION_REQUIREMENTS.md) for detailed installation instructions and troubleshooting.
 
 ## Installation
 
@@ -234,17 +249,31 @@ Claude should respond with the list of 25 migration tools.
 
 ### Starting a New Migration Session
 
-Every migration requires a session. Start by asking the AI assistant:
+**Every migration requires a session first.** The session provides a `sessionId` that is required by all migration stage tools.
 
+Ask the AI assistant:
 ```
 Create a new migration session for my project at /path/to/my-angular-app
 ```
 
-The assistant will:
-1. Create a session with a unique ID
-2. Validate the project structure
-3. Show the current Angular version
-4. Recommend the next step
+Or call the tool directly:
+```json
+{
+  "tool": "session_create",
+  "arguments": {
+    "projectPath": "/absolute/path/to/my-angular-app"
+  }
+}
+```
+
+The tool will:
+1. Create a session with a unique `sessionId` (e.g., `mcp-session-1`)
+2. Validate the project structure (checks for `angular.json`)
+3. Initialize workflow for Angular 14 → 20 migration
+4. Return the `sessionId` needed for all subsequent operations
+5. Recommend the next step (usually `migration_stage_pre_migration`)
+
+> **📖 Detailed Guide**: See [Session Management Guide](./docs/SESSION_MANAGEMENT.md) for complete session lifecycle documentation.
 
 ### Running Migration Stages
 

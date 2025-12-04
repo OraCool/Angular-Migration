@@ -11,7 +11,8 @@
     "test": "npm test --workspaces --if-present",
     "dev:acp": "npm run dev --workspace=packages/acp-agent",
     "dev:mcp": "npm run dev --workspace=packages/mcp-server",
-    "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules"
+    "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules",
+    "mcp:build": "cd packages/workflow-engine && npm run build && cd ../mcp-server && npm run build"
   },
   "keywords": [
     "angular",

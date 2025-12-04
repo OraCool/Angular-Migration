@@ -4,12 +4,13 @@
  */
 
 import { SessionManager } from '../session/manager.js';
-import { ToolResult } from '../types.js';
+import { ToolResult, ProgressCallback } from '../types.js';
 
 export async function handleStateTool(
   toolName: string,
   args: Record<string, unknown>,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  progressCallback?: ProgressCallback
 ): Promise<ToolResult> {
   switch (toolName) {
     case 'state_save_checkpoint':

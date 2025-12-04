@@ -13,18 +13,19 @@ import {
   type RestoreOptions,
 } from '@angular-migration/workflow-engine';
 import { SessionManager } from '../session/manager.js';
-import { ToolResult } from '../types.js';
+import { ToolResult, ProgressCallback } from '../types.js';
 
 export async function handleBackupRestoreTool(
   toolName: string,
   args: Record<string, unknown>,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  progressCallback?: ProgressCallback
 ): Promise<ToolResult> {
   switch (toolName) {
     case 'migration_backup':
-      return await migrationBackup(args, sessionManager);
+      return await migrationBackup(args, sessionManager, progressCallback);
     case 'migration_restore':
-      return await migrationRestore(args, sessionManager);
+      return await migrationRestore(args, sessionManager, progressCallback);
     default:
       return {
         success: false,
@@ -38,7 +39,8 @@ export async function handleBackupRestoreTool(
  */
 async function migrationBackup(
   args: Record<string, unknown>,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  progressCallback?: ProgressCallback
 ): Promise<ToolResult> {
   const sessionId = args.sessionId as string;
   const backupName = args.backupName as string | undefined;
@@ -121,7 +123,8 @@ async function migrationBackup(
  */
 async function migrationRestore(
   args: Record<string, unknown>,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  progressCallback?: ProgressCallback
 ): Promise<ToolResult> {
   const sessionId = args.sessionId as string;
   const backupPath = args.backupPath as string | undefined;

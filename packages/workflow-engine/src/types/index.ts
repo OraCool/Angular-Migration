@@ -36,6 +36,35 @@ export interface WorkflowEngineConfig {
 }
 
 /**
+ * Progress update notification
+ */
+export interface ProgressUpdate {
+  /** Progress message */
+  message: string;
+  /** Current progress percentage (0-100) */
+  progress?: number;
+  /** Current step being executed */
+  currentStep?: string;
+  /** Total steps */
+  totalSteps?: number;
+  /** Steps completed */
+  completedSteps?: number;
+  /** Type of progress update */
+  type?: 'info' | 'success' | 'warning' | 'error' | 'stage' | 'action';
+  /** Timestamp */
+  timestamp?: string;
+  /** MCP tool name that generated this update */
+  toolName?: string;
+  /** Additional metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Progress callback for streaming updates
+ */
+export type ProgressCallback = (update: ProgressUpdate) => void;
+
+/**
  * Stage execution options
  * Options that can be passed when executing a migration stage
  */
@@ -46,6 +75,8 @@ export interface StageExecutionOptions {
   autoConfirm?: boolean;
   /** Continue executing subsequent steps even if one fails */
   continueOnError?: boolean;
+  /** Progress callback for streaming updates */
+  progressCallback?: ProgressCallback;
   /** Additional stage-specific options */
   [key: string]: any;
 }

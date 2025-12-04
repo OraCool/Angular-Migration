@@ -6,6 +6,15 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import { execSync, spawn } from 'child_process';
+import { detectPackageManager } from './package-manager.js';
+import type { ProgressCallback } from '../types/index.js';
+
+// ES modules compatibility: resolve __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export interface PackageUpdateOptions {
   projectPath: string;
@@ -13,6 +22,7 @@ export interface PackageUpdateOptions {
   matrixPath?: string;
   dryRun?: boolean;
   createBackup?: boolean;
+  progressCallback?: ProgressCallback;
 }
 
 export interface PackageUpdateResult {
@@ -57,6 +67,149 @@ export interface VersionConfig {
 }
 
 /**
+ * Install packages with streaming progress updates
+ */
+async function installPackagesWithProgress(
+  projectPath: string,
+  installCommand: string,
+  progressCallback?: ProgressCallback
+): Promise<{ success: boolean; output: string; error?: string }> {
+  return new Promise((resolve) => {
+    const [command, ...args] = installCommand.split(' ');
+
+    const child = spawn(command, args, {
+      cwd: projectPath,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let lastUpdate = Date.now();
+    let packageCount = 0;
+
+    // Send initial progress
+    if (progressCallback) {
+      progressCallback({
+        message: '📦 Starting package installation...',
+        type: 'info',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Monitor stdout
+    child.stdout?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stdout += chunk;
+
+      // Parse npm output for package counts
+      const addedMatch = chunk.match(/added (\d+)/);
+      if (addedMatch) {
+        packageCount = parseInt(addedMatch[1], 10);
+      }
+
+      // Send progress every 500ms
+      if (progressCallback && Date.now() - lastUpdate > 500) {
+        let message = chunk.trim();
+
+        // Format npm output nicely
+        if (message.includes('added') && message.includes('package')) {
+          message = `📦 ${message}`;
+        } else if (message.includes('reify')) {
+          message = `⚙️  Installing and linking packages...`;
+        } else if (message.includes('idealTree')) {
+          message = `🌳 Calculating dependency tree...`;
+        } else if (message.includes('fetch')) {
+          message = `⬇️  Downloading packages...`;
+        } else if (message.length > 200) {
+          message = message.substring(0, 200) + '...';
+        }
+
+        progressCallback({
+          message,
+          type: 'info',
+          timestamp: new Date().toISOString(),
+          metadata: { packageCount },
+        });
+
+        lastUpdate = Date.now();
+      }
+    });
+
+    // Monitor stderr (npm writes progress to stderr)
+    child.stderr?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stderr += chunk;
+
+      // Send progress every 500ms
+      if (progressCallback && Date.now() - lastUpdate > 500) {
+        let message = chunk.trim();
+
+        // Format npm stderr output
+        if (message.includes('WARN')) {
+          message = `⚠️  ${message}`;
+        } else if (message.length > 200) {
+          message = message.substring(0, 200) + '...';
+        }
+
+        if (message) {
+          progressCallback({
+            message,
+            type: 'info',
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        lastUpdate = Date.now();
+      }
+    });
+
+    // Handle completion
+    child.on('close', (code) => {
+      if (progressCallback) {
+        if (code === 0) {
+          progressCallback({
+            message: `✅ Package installation completed successfully (${packageCount} packages)`,
+            type: 'success',
+            timestamp: new Date().toISOString(),
+            metadata: { packageCount },
+          });
+        } else {
+          progressCallback({
+            message: `⚠️  Package installation completed with warnings (exit code: ${code})`,
+            type: 'info',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      resolve({
+        success: code === 0 || stderr.includes('WARN'),
+        output: stdout || stderr,
+        error: code !== 0 ? stderr : undefined,
+      });
+    });
+
+    // Handle errors
+    child.on('error', (error) => {
+      if (progressCallback) {
+        progressCallback({
+          message: `❌ Package installation error: ${error.message}`,
+          type: 'error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      resolve({
+        success: false,
+        output: stdout,
+        error: error.message,
+      });
+    });
+  });
+}
+
+/**
  * Update all packages to target Angular version
  *
  * @param options - Update options
@@ -72,13 +225,23 @@ export async function updatePackages(
     matrixPath,
     dryRun = false,
     createBackup = true,
+    progressCallback,
   } = options;
 
   const changes: PackageChange[] = [];
   const removed: string[] = [];
+  const logs: string[] = []; // Collect all log messages for output
 
   try {
-    // Validate project path
+    // Step 1: Validate project path
+    if (progressCallback) {
+      progressCallback({
+        message: `🔍 Validating project at ${projectPath}...`,
+        type: 'info',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     if (!fs.existsSync(projectPath)) {
       throw new Error(`Project path does not exist: ${projectPath}`);
     }
@@ -91,11 +254,27 @@ export async function updatePackages(
     // Load package.json
     const pkgJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 
-    // Create backup if requested
+    // Step 2: Create backup if requested
     if (createBackup && !dryRun) {
+      if (progressCallback) {
+        progressCallback({
+          message: '📋 Creating backup of package.json...',
+          type: 'info',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       const backupPath = packageJsonPath + '.backup';
       fs.writeFileSync(backupPath, JSON.stringify(pkgJson, null, 2) + '\n');
       console.log(`📋 Backup created: ${backupPath}`);
+
+      if (progressCallback) {
+        progressCallback({
+          message: `✅ Backup created: ${backupPath}`,
+          type: 'success',
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
 
     // Load compatibility matrix
@@ -119,6 +298,15 @@ export async function updatePackages(
     }
 
     console.log(`✅ Compatibility matrix loaded for Angular ${targetVersion}`);
+
+    // Step 3: Update package.json
+    if (progressCallback) {
+      progressCallback({
+        message: `📝 Updating package.json to Angular ${targetVersion}...`,
+        type: 'info',
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     // Ensure dependencies and devDependencies objects exist
     if (!pkgJson.dependencies) pkgJson.dependencies = {};
@@ -289,18 +477,117 @@ export async function updatePackages(
       }
     }
 
-    // Write updated package.json (unless dry run)
+    // Step 4: Write updated package.json (unless dry run)
     if (!dryRun) {
       fs.writeFileSync(packageJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
       console.log('✅ package.json updated');
+
+      if (progressCallback) {
+        progressCallback({
+          message: `✅ package.json updated with ${changes.length} package changes`,
+          type: 'success',
+          timestamp: new Date().toISOString(),
+          metadata: { changesCount: changes.length },
+        });
+      }
+
+      // Step 5: Remove package-lock.json for clean install
+      const packageLockPath = path.join(projectPath, 'package-lock.json');
+      if (fs.existsSync(packageLockPath)) {
+        if (progressCallback) {
+          progressCallback({
+            message: '🗑️  Removing package-lock.json for clean install...',
+            type: 'info',
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        fs.unlinkSync(packageLockPath);
+        console.log('🗑️  Removed package-lock.json');
+
+        if (progressCallback) {
+          progressCallback({
+            message: '✅ package-lock.json removed',
+            type: 'success',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Step 6: Detect package manager and install packages with streaming
+      const packageManager = detectPackageManager(projectPath);
+
+      // Log the exact directory where we'll run npm install
+      const dirMsg = `📁 Working directory: ${projectPath}`;
+      console.log(dirMsg);
+      logs.push(dirMsg);
+
+      // Check if node_modules exists before install
+      const nodeModulesPath = path.join(projectPath, 'node_modules');
+      const beforeExists = fs.existsSync(nodeModulesPath);
+      const beforeMsg = `📦 node_modules before install: ${beforeExists ? 'EXISTS' : 'DOES NOT EXIST'}`;
+      console.log(beforeMsg);
+      logs.push(beforeMsg);
+
+      const installMsg = `\n📦 Installing packages using ${packageManager.type}...`;
+      console.log(installMsg);
+      logs.push(installMsg);
+
+      const runMsg = `Running: ${packageManager.installCommand} in ${projectPath}`;
+      console.log(runMsg);
+      logs.push(runMsg);
+
+      // Use streaming installation with progress updates
+      const installResult = await installPackagesWithProgress(
+        projectPath,
+        packageManager.installCommand,
+        progressCallback
+      );
+
+      // Check if node_modules exists after install
+      const afterExists = fs.existsSync(nodeModulesPath);
+      const afterMsg = `📦 node_modules after install: ${afterExists ? 'EXISTS' : 'DOES NOT EXIST'}`;
+      console.log(afterMsg);
+      logs.push(afterMsg);
+
+      if (installResult.success) {
+        const successMsg = '✅ Packages installed successfully';
+        console.log(successMsg);
+        logs.push(successMsg);
+
+        if (installResult.output) {
+          logs.push('--- INSTALL OUTPUT START ---');
+          logs.push(installResult.output);
+          logs.push('--- INSTALL OUTPUT END ---');
+        }
+      } else {
+        // Log warning but don't fail - the package.json is updated
+        const warnMsg = `⚠️  ${packageManager.installCommand} had warnings`;
+        console.warn(warnMsg);
+        logs.push(warnMsg);
+
+        if (installResult.error) {
+          console.warn('--- INSTALL ERROR START ---');
+          console.warn(installResult.error);
+          console.warn('--- INSTALL ERROR END ---');
+          logs.push('--- INSTALL ERROR START ---');
+          logs.push(installResult.error);
+          logs.push('--- INSTALL ERROR END ---');
+        }
+      }
     } else {
       console.log('ℹ️  Dry run - no changes written to package.json');
     }
 
     const duration = Date.now() - startTime;
+    const summaryMsg = `Successfully updated ${changes.length} packages to Angular ${targetVersion} compatible versions`;
+    const fullMessage = logs.length > 0
+      ? `${summaryMsg}\n\n${logs.join('\n')}`
+      : summaryMsg;
+
     return {
       success: true,
-      message: `Successfully updated ${changes.length} packages to Angular ${targetVersion} compatible versions`,
+      message: fullMessage,
       changes,
       removed: removed.length > 0 ? removed : undefined,
       duration,

@@ -117,3 +117,51 @@ export interface ValidationInfo {
   warnings: string[];
   suggestions: string[];
 }
+
+/**
+ * Progress update notification
+ */
+export interface ProgressUpdate {
+  /** Progress message */
+  message: string;
+
+  /** Current progress percentage (0-100) */
+  progress?: number;
+
+  /** Current step being executed */
+  currentStep?: string;
+
+  /** Total steps */
+  totalSteps?: number;
+
+  /** Steps completed */
+  completedSteps?: number;
+
+  /** Type of progress update */
+  type?: 'info' | 'success' | 'warning' | 'error' | 'stage' | 'action';
+
+  /** Timestamp */
+  timestamp?: string;
+
+  /** MCP tool name that generated this update */
+  toolName?: string;
+
+  /** Additional metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Progress callback for streaming updates
+ */
+export type ProgressCallback = (update: ProgressUpdate) => void;
+
+/**
+ * Streaming-enabled tool result
+ */
+export interface StreamingToolResult extends ToolResult {
+  /** Indicates if the tool supports streaming */
+  streamed?: boolean;
+
+  /** Progress updates collected during execution */
+  progressUpdates?: ProgressUpdate[];
+}

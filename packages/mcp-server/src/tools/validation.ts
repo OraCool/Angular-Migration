@@ -6,7 +6,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { SessionManager } from '../session/manager.js';
-import { ToolResult, ValidationInfo } from '../types.js';
+import { ToolResult, ValidationInfo, ProgressCallback } from '../types.js';
 import {
   getCurrentNodeVersion,
   getRecommendedNodeVersion,
@@ -16,7 +16,8 @@ import {
 export async function handleValidationTool(
   toolName: string,
   args: Record<string, unknown>,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  progressCallback?: ProgressCallback
 ): Promise<ToolResult> {
   switch (toolName) {
     case 'validate_project':

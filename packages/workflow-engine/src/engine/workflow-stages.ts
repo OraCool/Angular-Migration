@@ -32,6 +32,32 @@ export interface StageDefinition {
 }
 
 /**
+ * Subtask definition interface
+ * Represents a granular atomic operation within a stage
+ * Provides fine-grained control for retry, progress tracking, and timeout isolation
+ */
+export interface SubtaskDefinition {
+  /** Unique subtask identifier (e.g., 'migration_v15_install_dependencies') */
+  id: string;
+  /** Human-readable subtask name (e.g., 'Install Dependencies') */
+  name: string;
+  /** Detailed description of what this subtask does */
+  description: string;
+  /** Parent stage ID this subtask belongs to */
+  stageId: string;
+  /** Execution order within the stage (0-based) */
+  order: number;
+  /** Estimated duration for this subtask */
+  estimatedDuration: string;
+  /** Whether this subtask can timeout (long operations like npm install) */
+  canTimeout: boolean;
+  /** Whether this subtask requires user confirmation */
+  requiresConfirmation: boolean;
+  /** IDs of subtasks that must be completed before this one */
+  dependencies?: string[];
+}
+
+/**
  * Core migration stages (7 stages in sequential order)
  * These represent the main Angular version migration path from 14 to 20
  */
@@ -248,4 +274,104 @@ export function getAvailableOptionalStages(
     (stage) =>
       !completedStageIds.has(stage.id) && areDependenciesMet(stage, completedStageIds)
   );
+}
+
+/**
+ * Subtask definitions for granular control
+ * Each Angular version upgrade (v15-v20) is split into atomic operations
+ * This enables:
+ * - Better timeout isolation (npm install is separate)
+ * - Fine-grained retry (retry just npm install)
+ * - Better progress visibility
+ * - Individual step control
+ */
+
+/** Helper function to create version upgrade subtasks */
+function createVersionSubtasks(version: string): SubtaskDefinition[] {
+  const stageId = `migration_stage_v${version}`;
+
+  return [
+    {
+      id: `migration_v${version}_update_packages`,
+      name: `Update Packages to v${version}`,
+      description: `Update package.json dependencies to Angular ${version}`,
+      stageId,
+      order: 0,
+      estimatedDuration: '< 1 minute',
+      canTimeout: false,
+      requiresConfirmation: false,
+    },
+    {
+      id: `migration_v${version}_install_dependencies`,
+      name: 'Install Dependencies',
+      description: `Run npm install to download Angular ${version} packages (this is the long operation)`,
+      stageId,
+      order: 1,
+      estimatedDuration: '5-10 minutes',
+      canTimeout: true, // ⚠️ This is the timeout culprit
+      requiresConfirmation: false,
+      dependencies: [`migration_v${version}_update_packages`],
+    },
+    {
+      id: `migration_v${version}_run_migrations`,
+      name: 'Run Migrations',
+      description: `Execute Angular ${version} schematics and migrations`,
+      stageId,
+      order: 2,
+      estimatedDuration: '2-5 minutes',
+      canTimeout: true,
+      requiresConfirmation: false,
+      dependencies: [`migration_v${version}_install_dependencies`],
+    },
+    {
+      id: `migration_v${version}_build_validate`,
+      name: 'Build & Validate',
+      description: `Build the project and validate Angular ${version} compatibility`,
+      stageId,
+      order: 3,
+      estimatedDuration: '2-5 minutes',
+      canTimeout: true,
+      requiresConfirmation: false,
+      dependencies: [`migration_v${version}_run_migrations`],
+    },
+    {
+      id: `migration_v${version}_commit`,
+      name: 'Commit Changes',
+      description: `Commit Angular ${version} upgrade to git`,
+      stageId,
+      order: 4,
+      estimatedDuration: '< 1 minute',
+      canTimeout: false,
+      requiresConfirmation: false,
+      dependencies: [`migration_v${version}_build_validate`],
+    },
+  ];
+}
+
+/** All subtasks for Angular version upgrades (v15-v20) */
+export const VERSION_UPGRADE_SUBTASKS: SubtaskDefinition[] = [
+  ...createVersionSubtasks('15'),
+  ...createVersionSubtasks('16'),
+  ...createVersionSubtasks('17'),
+  ...createVersionSubtasks('18'),
+  ...createVersionSubtasks('19'),
+  ...createVersionSubtasks('20'),
+];
+
+/**
+ * Get all subtasks for a specific stage
+ * @param stageId - The stage identifier
+ * @returns Array of subtasks for the stage
+ */
+export function getSubtasksByStageId(stageId: string): SubtaskDefinition[] {
+  return VERSION_UPGRADE_SUBTASKS.filter((subtask) => subtask.stageId === stageId);
+}
+
+/**
+ * Get a subtask definition by ID
+ * @param subtaskId - The subtask identifier
+ * @returns The subtask definition or undefined if not found
+ */
+export function getSubtaskById(subtaskId: string): SubtaskDefinition | undefined {
+  return VERSION_UPGRADE_SUBTASKS.find((subtask) => subtask.id === subtaskId);
 }

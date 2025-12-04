@@ -86,6 +86,18 @@ export class SessionManager {
   }
 
   /**
+   * Get the most recently active session
+   */
+  getMostRecentSession(): Session | undefined {
+    const sessions = Array.from(this.sessions.values());
+    if (sessions.length === 0) return undefined;
+    
+    // Sort by last activity time, most recent first
+    sessions.sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime());
+    return sessions[0];
+  }
+
+  /**
    * Delete a session
    */
   deleteSession(sessionId: string): boolean {

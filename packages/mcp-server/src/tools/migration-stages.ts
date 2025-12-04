@@ -14,7 +14,7 @@
  */
 
 import { SessionManager } from '../session/manager.js';
-import { ToolResult } from '../types.js';
+import { ToolResult, ProgressCallback } from '../types.js';
 import {
   validateNodeVersion,
   getNodeVersionError,
@@ -44,7 +44,8 @@ const READ_ONLY_TOOLS = [
 export async function handleMigrationStageTool(
   toolName: string,
   args: Record<string, unknown>,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  progressCallback?: ProgressCallback
 ): Promise<ToolResult> {
   // 1. VALIDATE NODE VERSION (unless it's a read-only tool)
   if (!READ_ONLY_TOOLS.includes(toolName)) {
@@ -52,16 +53,56 @@ export async function handleMigrationStageTool(
     if (!nodeValidation.valid) {
       return {
         success: false,
-        error: 'Node.js version mismatch',
+        error: '⛔ BLOCKED: Node.js version mismatch - Migration cannot proceed',
         details: {
           required: nodeValidation.requiredVersion,
           current: nodeValidation.currentVersion,
+          blocking: true,
+          reason: 'Angular 20 requires Node.js v22. Current version is incompatible.',
         },
-        message: getNodeVersionError(nodeValidation),
+        message: `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⛔ MIGRATION BLOCKED - ACTION REQUIRED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Node.js Version Mismatch
+  Required: ${nodeValidation.requiredVersion}
+  Current:  ${nodeValidation.currentVersion}
+
+Angular 20 requires Node.js v22. Your current Node.js version (${nodeValidation.currentVersion})
+is not compatible and will cause build failures.
+
+⚠️  CANNOT PROCEED - You must install Node.js v22 first.
+⚠️  DO NOT attempt manual migration - it will fail with the wrong Node version.
+⚠️  DO NOT use workarounds - this is a hard requirement.
+
+${getNodeVersionError(nodeValidation)}
+
+After installing Node.js v22:
+  1. Close and restart your terminal/IDE
+  2. Verify version: node --version (should show v22.x.x)
+  3. Try the migration command again
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        `.trim(),
+        troubleshooting: {
+          likelyCause: 'Incorrect Node.js version installed',
+          suggestedFixes: [
+            '1. Install Node.js v22 using the instructions above',
+            '2. Restart your terminal/IDE completely',
+            '3. Verify with: node --version',
+            '4. Retry the migration command',
+          ],
+          relatedDocs: [
+            'https://nodejs.org/en/download/',
+            'https://github.com/nvm-sh/nvm#usage',
+          ],
+          canRetry: false, // Cannot retry until Node version is fixed
+          canRollback: false,
+        },
         nextStep: {
-          action: 'Install Node.js v22',
-          description: 'Install the required Node.js version and retry',
-          reasoning: 'Angular 20 requires Node.js v22 for optimal compatibility',
+          action: '🛑 STOP - Install Node.js v22 first',
+          description: 'You must install Node.js v22 before proceeding with Angular migration',
+          reasoning: 'This is a hard requirement. Angular 20 will not work with other Node.js versions.',
         },
       };
     }
@@ -71,25 +112,25 @@ export async function handleMigrationStageTool(
   switch (toolName) {
     // Core migration stage tools (7 tools)
     case 'migration_stage_pre_migration':
-      return executeStage('migration_stage_pre_migration', args, sessionManager);
+      return executeStage('migration_stage_pre_migration', args, sessionManager, progressCallback);
     case 'migration_stage_v15':
-      return executeStage('migration_stage_v15', args, sessionManager);
+      return executeStage('migration_stage_v15', args, sessionManager, progressCallback);
     case 'migration_stage_v16':
-      return executeStage('migration_stage_v16', args, sessionManager);
+      return executeStage('migration_stage_v16', args, sessionManager, progressCallback);
     case 'migration_stage_v17':
-      return executeStage('migration_stage_v17', args, sessionManager);
+      return executeStage('migration_stage_v17', args, sessionManager, progressCallback);
     case 'migration_stage_v18':
-      return executeStage('migration_stage_v18', args, sessionManager);
+      return executeStage('migration_stage_v18', args, sessionManager, progressCallback);
     case 'migration_stage_v19':
-      return executeStage('migration_stage_v19', args, sessionManager);
+      return executeStage('migration_stage_v19', args, sessionManager, progressCallback);
     case 'migration_stage_v20':
-      return executeStage('migration_stage_v20', args, sessionManager);
+      return executeStage('migration_stage_v20', args, sessionManager, progressCallback);
     case 'migration_stage_post_migration':
-      return executeStage('migration_stage_post_migration', args, sessionManager);
+      return executeStage('migration_stage_post_migration', args, sessionManager, progressCallback);
 
     // Optional feature migration tool (1 tool)
     case 'migration_feature_standalone':
-      return executeFeatureStandalone(args, sessionManager);
+      return executeFeatureStandalone(args, sessionManager, progressCallback);
 
     // Stage management tools (4 tools)
     case 'migration_stage_get_current':
@@ -115,7 +156,8 @@ export async function handleMigrationStageTool(
 async function executeStage(
   stageId: string,
   args: Record<string, unknown>,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  progressCallback?: ProgressCallback
 ): Promise<ToolResult> {
   const sessionId = args.sessionId as string;
 
@@ -188,6 +230,7 @@ async function executeStage(
     skipValidations: args.skipValidations === true,
     autoConfirm: args.autoConfirm === true,
     continueOnError: args.continueOnError === true,
+    progressCallback, // Pass progress callback for streaming updates
   };
 
   // Execute the stage
@@ -314,7 +357,8 @@ async function executeStage(
  */
 async function executeFeatureStandalone(
   args: Record<string, unknown>,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  progressCallback?: ProgressCallback
 ): Promise<ToolResult> {
   const sessionId = args.sessionId as string;
 
@@ -369,6 +413,7 @@ async function executeFeatureStandalone(
     skipValidations: args.skipValidations === true,
     autoConfirm: args.autoConfirm === true,
     continueOnError: args.continueOnError === true,
+    progressCallback, // Pass progress callback for streaming updates
   };
 
   try {
@@ -440,13 +485,24 @@ async function stageGetCurrent(
   args: Record<string, unknown>,
   sessionManager: SessionManager
 ): Promise<ToolResult> {
-  const sessionId = args.sessionId as string;
+  let sessionId = args.sessionId as string;
 
+  // Auto-detect session if not provided
   if (!sessionId) {
-    return {
-      success: false,
-      error: 'Missing required parameter: sessionId',
-    };
+    const recentSession = sessionManager.getMostRecentSession();
+    if (!recentSession) {
+      return {
+        success: false,
+        error: 'No sessionId provided and no active sessions found',
+        nextStep: {
+          action: 'session_create',
+          description: 'Create a new migration session first',
+          reasoning: 'You need an active session to check the current migration stage',
+        },
+      };
+    }
+    sessionId = recentSession.id;
+    console.error(`[stageGetCurrent] Auto-detected session: ${sessionId}`);
   }
 
   const session = sessionManager.getSession(sessionId);

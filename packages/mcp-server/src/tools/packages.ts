@@ -8,7 +8,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { SessionManager } from '../session/manager.js';
-import { ToolResult } from '../types.js';
+import { ToolResult, ProgressCallback } from '../types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -16,7 +16,8 @@ const __dirname = dirname(__filename);
 export async function handlePackageTool(
   toolName: string,
   args: Record<string, unknown>,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  progressCallback?: ProgressCallback
 ): Promise<ToolResult> {
   switch (toolName) {
     case 'packages_get_compatibility':

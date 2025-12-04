@@ -11,6 +11,8 @@ import type {
   StageExecutionResult,
   StepExecutionResult,
   StageProgress,
+  ProgressCallback,
+  ProgressUpdate,
 } from '../types/index.js';
 import { StateManager } from './state-manager.js';
 import {
@@ -18,7 +20,7 @@ import {
   getStageById as getStageDefinitionById,
   getStageByStepIndex,
 } from './workflow-stages.js';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import { getPlatform, getShellCommand } from '../utils/platform.js';
 import { cleanPackages } from '../utils/package-manager.js';
 import { updatePackages } from '../utils/package-updater.js';
@@ -102,6 +104,7 @@ export interface WorkflowContext {
   skipTests?: boolean;
   skipLint?: boolean;
   autoConfirm?: boolean;
+  progressCallback?: ProgressCallback;
 }
 
 /**
@@ -210,6 +213,13 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
         name: 'run-migrations-v15',
         command: 'npx ng update @angular/core@15 --migrate-only --allow-dirty --force || true',
         description: 'Run Angular 15 migration schematics (if any)',
+        timeout: 180000,
+      },
+      {
+        type: 'command',
+        name: 'run-material-migrations-v15',
+        command: 'npx ng update @angular/material@15 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular Material 15 migration schematics (chips API redesign: mat-chip-list → mat-chip-listbox)',
         timeout: 180000,
       },
       {
@@ -396,6 +406,13 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
         description: 'Run Angular 16 migration schematics (if any)',
         timeout: 180000,
       },
+      {
+        type: 'command',
+        name: 'run-material-migrations-v16',
+        command: 'npx ng update @angular/material@16 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular Material 16 migration schematics (MDC components, legacy module removal)',
+        timeout: 180000,
+      },
     ],
     rollbackActions: [
       {
@@ -483,6 +500,13 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
         name: 'run-migrations-v17',
         command: 'npx ng update @angular/core@17 --migrate-only --allow-dirty --force || true',
         description: 'Run Angular 17 migration schematics (if any)',
+        timeout: 180000,
+      },
+      {
+        type: 'command',
+        name: 'run-material-migrations-v17',
+        command: 'npx ng update @angular/material@17 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular Material 17 migration schematics (MDC migration completion, legacy components removal)',
         timeout: 180000,
       },
     ],
@@ -600,6 +624,13 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
         description: 'Run Angular 18 migration schematics (if any)',
         timeout: 180000,
       },
+      {
+        type: 'command',
+        name: 'run-material-migrations-v18',
+        command: 'npx ng update @angular/material@18 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular Material 18 migration schematics (Material 3 theming updates)',
+        timeout: 180000,
+      },
     ],
     rollbackActions: [
       {
@@ -689,6 +720,13 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
         description: 'Run Angular 19 migration schematics (if any)',
         timeout: 180000,
       },
+      {
+        type: 'command',
+        name: 'run-material-migrations-v19',
+        command: 'npx ng update @angular/material@19 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular Material 19 migration schematics (API updates and deprecation fixes)',
+        timeout: 180000,
+      },
     ],
     rollbackActions: [
       {
@@ -776,6 +814,13 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
         name: 'run-migrations-v20',
         command: 'npx ng update @angular/core@20 --migrate-only --allow-dirty --force || true',
         description: 'Run Angular 20 migration schematics (if any)',
+        timeout: 180000,
+      },
+      {
+        type: 'command',
+        name: 'run-material-migrations-v20',
+        command: 'npx ng update @angular/material@20 --migrate-only --allow-dirty --force || true',
+        description: 'Run Angular Material 20 migration schematics (latest Material updates and API refinements)',
         timeout: 180000,
       },
     ],
@@ -883,6 +928,22 @@ export class WorkflowEngine {
 
   getContext(): WorkflowContext {
     return this.context;
+  }
+
+  /**
+   * Set progress callback for streaming updates
+   * @param callback - Function to call with progress updates
+   */
+  setProgressCallback(callback?: ProgressCallback): void {
+    this.context.progressCallback = callback;
+  }
+
+  /**
+   * Get current progress callback
+   * @returns Current progress callback or undefined
+   */
+  getProgressCallback(): ProgressCallback | undefined {
+    return this.context.progressCallback;
   }
 
   getCurrentStep(): WorkflowStep | null {
@@ -1436,13 +1497,181 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
   }
 
   /**
+   * Parse progress message to extract meaningful information
+   */
+  private parseProgressMessage(chunk: string, commandStr: string): string {
+    // Trim whitespace
+    const trimmed = chunk.trim();
+    if (!trimmed) return '';
+
+    // For npm install, extract meaningful progress indicators
+    if (commandStr.includes('npm install') || commandStr.includes('npm i ')) {
+      // Parse npm progress indicators like "added 123 packages" or "⸨████████████⸩ ⠹ reify:..."
+      if (trimmed.includes('added') && trimmed.includes('package')) {
+        return `📦 ${trimmed}`;
+      }
+      if (trimmed.includes('removed') && trimmed.includes('package')) {
+        return `🗑️  ${trimmed}`;
+      }
+      if (trimmed.includes('changed') && trimmed.includes('package')) {
+        return `🔄 ${trimmed}`;
+      }
+      if (trimmed.includes('reify')) {
+        return `⚙️  Installing and linking packages...`;
+      }
+      if (trimmed.includes('idealTree')) {
+        return `🌳 Calculating dependency tree...`;
+      }
+      if (trimmed.includes('fetch')) {
+        return `⬇️  Downloading packages...`;
+      }
+      // Show progress bars but clean them up
+      if (trimmed.includes('⸨') || trimmed.includes('░') || trimmed.includes('█')) {
+        return `⏳ Installing packages (in progress)...`;
+      }
+    }
+
+    // For build commands
+    if (commandStr.includes('build') || commandStr.includes('ng build')) {
+      if (trimmed.includes('Building') || trimmed.includes('Compiling')) {
+        return `🔨 ${trimmed}`;
+      }
+      if (trimmed.includes('✔') || trimmed.includes('successfully')) {
+        return `✅ ${trimmed}`;
+      }
+    }
+
+    // For git commands
+    if (commandStr.includes('git')) {
+      return `📝 ${trimmed}`;
+    }
+
+    // For Angular CLI commands
+    if (commandStr.includes('ng update') || commandStr.includes('ng migrate')) {
+      return `🔄 ${trimmed}`;
+    }
+
+    // Default: return as-is but limit length
+    return trimmed.length > 200 ? trimmed.substring(0, 200) + '...' : trimmed;
+  }
+
+  /**
    * Execute a command action (shell command)
    */
+  /**
+   * Execute a command with streaming output support
+   * Uses spawn for long-running commands to provide progress updates
+   */
+  private async executeCommandActionStreaming(
+    action: WorkflowAction
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    if (!action.command) {
+      throw new Error('Command action requires a command');
+    }
+
+    const commandStr = action.command; // Type narrowing - we know it's not undefined after the check
+
+    return new Promise((resolve, reject) => {
+      const platform = getPlatform();
+      const command = getShellCommand(commandStr, platform);
+      const workingDir = action.workingDir || this.context.projectPath;
+      const timeout = action.timeout || 600000; // Default 10 minutes for streaming commands
+
+      // Parse command into shell and args
+      const isWindows = platform === 'windows';
+      const shell = isWindows ? 'powershell.exe' : '/bin/bash';
+      const shellArgs = isWindows ? ['-Command', command] : ['-c', command];
+
+      const child = spawn(shell, shellArgs, {
+        cwd: workingDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let lastProgressUpdate = Date.now();
+
+      // Use shorter interval for npm install (more frequent updates)
+      const isNpmInstall = commandStr.includes('npm install') || commandStr.includes('npm i ');
+      const progressInterval = isNpmInstall ? 500 : 2000; // 500ms for npm, 2s for others
+
+      // Set timeout
+      const timeoutHandle = setTimeout(() => {
+        child.kill('SIGTERM');
+        reject(new Error(`Command timed out after ${timeout}ms`));
+      }, timeout);
+
+      // Stream stdout with progress updates
+      child.stdout?.on('data', (data: Buffer) => {
+        const chunk = data.toString();
+        stdout += chunk;
+
+        // Send progress update if callback exists and interval elapsed
+        if (this.context.progressCallback && Date.now() - lastProgressUpdate > progressInterval) {
+          const message = this.parseProgressMessage(chunk, commandStr);
+          this.context.progressCallback({
+            message,
+            type: 'info',
+            timestamp: new Date().toISOString(),
+          });
+          lastProgressUpdate = Date.now();
+        }
+      });
+
+      // Stream stderr with progress updates
+      child.stderr?.on('data', (data: Buffer) => {
+        const chunk = data.toString();
+        stderr += chunk;
+
+        // npm writes progress to stderr, so treat it as info
+        if (this.context.progressCallback && Date.now() - lastProgressUpdate > progressInterval) {
+          const message = this.parseProgressMessage(chunk, commandStr);
+          this.context.progressCallback({
+            message,
+            type: 'info',
+            timestamp: new Date().toISOString(),
+          });
+          lastProgressUpdate = Date.now();
+        }
+      });
+
+      // Handle process completion
+      child.on('close', (code) => {
+        clearTimeout(timeoutHandle);
+
+        // Check if this is an acceptable "error" (e.g., git commit with no changes)
+        if (code !== 0 && !commandStr.includes('|| true') && !commandStr.includes('git commit')) {
+          resolve({
+            success: false,
+            error: stderr || `Command exited with code ${code}`,
+            output: stdout,
+          });
+        } else {
+          resolve({
+            success: true,
+            output: stdout.trim() || stderr.trim() || 'Command completed (no output)',
+          });
+        }
+      });
+
+      // Handle process errors
+      child.on('error', (error) => {
+        clearTimeout(timeoutHandle);
+        reject(error);
+      });
+    });
+  }
+
   private async executeCommandAction(
     action: WorkflowAction
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     if (!action.command) {
       throw new Error('Command action requires a command');
+    }
+
+    // Use streaming execution if progress callback is set
+    if (this.context.progressCallback) {
+      return this.executeCommandActionStreaming(action);
     }
 
     try {
@@ -1588,6 +1817,7 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
             targetVersion,
             createBackup: false, // Already handled by workflow
             dryRun: false,
+            progressCallback: this.context.progressCallback, // Pass progress callback for streaming
           });
 
           if (!result.success) {
@@ -1597,17 +1827,10 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
             };
           }
 
-          const changes = result.changes || [];
-          const removed = result.removed || [];
-          let output = `Updated ${changes.length} packages to Angular ${targetVersion}`;
-
-          if (removed.length > 0) {
-            output += `\nRemoved ${removed.length} deprecated packages: ${removed.join(', ')}`;
-          }
-
+          // Return the full message from updatePackages which includes install status
           return {
             success: true,
-            output,
+            output: result.message,
           };
         }
 
@@ -1694,6 +1917,7 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
     options: StageExecutionOptions = {}
   ): Promise<StageExecutionResult> {
     const stage = this.getStageById(stageId);
+    const progressCallback = options.progressCallback;
 
     if (!stage) {
       return {
@@ -1704,12 +1928,33 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
       };
     }
 
+    // Set progress callback on context so command actions can use it for streaming
+    const previousCallback = this.context.progressCallback;
+    if (progressCallback) {
+      this.context.progressCallback = progressCallback;
+    }
+
     const stageSteps = this.getStageSteps(stageId);
     const results: StepExecutionResult[] = [];
     let failedStep: string | undefined;
 
+    // Report stage start
+    if (progressCallback) {
+      progressCallback({
+        message: `Starting stage: ${stage.name}`,
+        type: 'stage',
+        totalSteps: stageSteps.length,
+        completedSteps: 0,
+        progress: 0,
+        timestamp: new Date().toISOString(),
+        metadata: { stageId, stageName: stage.name },
+      });
+    }
+
     // Execute each step in the stage
-    for (const step of stageSteps) {
+    for (let i = 0; i < stageSteps.length; i++) {
+      const step = stageSteps[i];
+
       // Check if step requires confirmation
       if (step.requiresConfirmation && !options.autoConfirm) {
         return {
@@ -1721,6 +1966,20 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
         };
       }
 
+      // Report step start
+      if (progressCallback) {
+        progressCallback({
+          message: `Executing: ${step.title}`,
+          type: 'action',
+          currentStep: step.id,
+          totalSteps: stageSteps.length,
+          completedSteps: i,
+          progress: Math.round((i / stageSteps.length) * 100),
+          timestamp: new Date().toISOString(),
+          metadata: { stepId: step.id, stepTitle: step.title },
+        });
+      }
+
       // Execute the step
       const stepResult = await this.executeStep(step, options);
       results.push(stepResult);
@@ -1729,18 +1988,60 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
         failedStep = step.id;
         this.markStepFailed(step.id);
 
+        // Report step failure
+        if (progressCallback) {
+          progressCallback({
+            message: `Step failed: ${step.title}`,
+            type: 'error',
+            currentStep: step.id,
+            totalSteps: stageSteps.length,
+            completedSteps: i,
+            progress: Math.round((i / stageSteps.length) * 100),
+            timestamp: new Date().toISOString(),
+            metadata: { stepId: step.id, error: stepResult.error },
+          });
+        }
+
         if (!options.continueOnError) {
           break;
         }
       } else {
-        // Mark step as completed
-        if (!this.state.completedSteps.includes(step.id)) {
-          this.state.completedSteps.push(step.id);
+        // Advance to next step (marks completed and increments currentStepIndex)
+        await this.advanceToNextStep();
+
+        // Report step success
+        if (progressCallback) {
+          progressCallback({
+            message: `Completed: ${step.title}`,
+            type: 'success',
+            currentStep: step.id,
+            totalSteps: stageSteps.length,
+            completedSteps: i + 1,
+            progress: Math.round(((i + 1) / stageSteps.length) * 100),
+            timestamp: new Date().toISOString(),
+            metadata: { stepId: step.id },
+          });
         }
       }
     }
 
     const success = !failedStep;
+
+    // Report stage completion
+    if (progressCallback) {
+      progressCallback({
+        message: success ? `Stage completed: ${stage.name}` : `Stage failed: ${stage.name}`,
+        type: success ? 'success' : 'error',
+        totalSteps: stageSteps.length,
+        completedSteps: results.filter(r => r.success).length,
+        progress: 100,
+        timestamp: new Date().toISOString(),
+        metadata: { stageId, success, failedStep },
+      });
+    }
+
+    // Restore previous progress callback
+    this.context.progressCallback = previousCallback;
 
     return {
       success,

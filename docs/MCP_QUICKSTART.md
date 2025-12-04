@@ -4,9 +4,11 @@ Get the Angular Migration MCP server running in 5 minutes.
 
 ## Prerequisites
 
-- ✅ Node.js v22.x installed
+- ⚠️ **Node.js v22.x** (REQUIRED - migration will be blocked without it)
 - ✅ npm or yarn
 - ✅ Zed IDE, VS Code, or Claude Desktop installed
+
+> **🛑 Critical**: If you don't have Node.js v22, the migration tool will **stop immediately** with a blocking error. Install it first: https://nodejs.org or use nvm: `nvm install 22`
 
 ## Quick Setup
 
@@ -18,6 +20,12 @@ cd Angular-Migration
 
 # Install and build all packages
 npm install
+
+# Build MCP server
+npm run mcp:build
+
+# Alternatively, manually:
+
 cd packages/workflow-engine && npm run build
 cd ../mcp-server && npm run build
 
@@ -74,13 +82,14 @@ Add to Zed's `settings.json` (`⌘,` on macOS):
 }
 ```
 
-**Test**: Command Palette (`⌘⇧P`) → "MCP: List Tools" → See 25 tools
+**Test**: Command Palette (`⌘⇧P`) → "MCP: List Tools" → See 31 tools
 
 ---
 
 ### For Claude Desktop
 
 Edit config file:
+
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 - **Linux**: `~/.config/Claude/claude_desktop_config.json`
@@ -105,6 +114,7 @@ Edit config file:
 ### 1. Start a Session
 
 Ask your AI assistant:
+
 ```
 Create a migration session for my Angular project at /path/to/my-app
 ```
@@ -118,6 +128,7 @@ Run pre-migration stage for session mcp-abc123
 ```
 
 This will:
+
 - ✅ Create backup
 - ✅ Validate project
 - ✅ Commit current state
@@ -133,6 +144,7 @@ The AI will execute the upgrade, show progress, and recommend the next step.
 ### 4. Continue Through Versions
 
 Just follow the recommendations! Each stage tells you what to do next:
+
 - v15 → v16 → v17 → v18 → v19 → v20 → Post-migration
 
 ---
@@ -140,23 +152,45 @@ Just follow the recommendations! Each stage tells you what to do next:
 ## Common Commands
 
 ### Check Progress
+
 ```
 What's the current stage for session [session-id]?
 ```
 
 ### List All Stages
+
 ```
 Show all migration stages for session [session-id]
 ```
 
 ### Create Backup Anytime
+
 ```
 Create a backup for session [session-id]
 ```
 
 ### Jump to Specific Version
+
 ```
 Skip to Angular 17 stage for session [session-id]
+```
+
+### Apply Breaking Changes Fixes
+
+```
+Apply breaking changes fixes for Angular 17
+```
+
+Or preview what would be fixed:
+
+```
+Apply breaking changes fixes for Angular 17 in dry-run mode
+```
+
+### List Available Breaking Changes Fixes
+
+```
+List available breaking changes fix scripts
 ```
 
 ---
@@ -166,6 +200,7 @@ Skip to Angular 17 stage for session [session-id]
 ### "MCP Server Not Found"
 
 **Quick Fix**:
+
 1. Check the path is absolute (not relative)
 2. Verify file exists: `ls [YOUR_PATH]/dist/index.js`
 3. Restart your IDE/application
@@ -174,6 +209,7 @@ Skip to Angular 17 stage for session [session-id]
 ### "Node Version Error"
 
 **Quick Fix**:
+
 ```bash
 node --version  # Should be v22.x.x
 
@@ -189,6 +225,7 @@ npm run build
 ### "Build Failed"
 
 **Quick Fix**:
+
 ```bash
 cd packages/mcp-server
 rm -rf dist node_modules
@@ -209,21 +246,27 @@ npm run build
 
 ## What's Available
 
-### 25 MCP Tools
+### 31 MCP Tools
 
 **Core Migration** (8 stages):
+
 - Pre-migration → v15 → v16 → v17 → v18 → v19 → v20 → Post-migration
 
 **Optional Features** (1):
+
 - Standalone components migration
 
 **Stage Management** (4):
+
 - Get current, skip to, list all, validate Node version
 
-**Supporting Tools** (12):
+**Supporting Tools** (18):
+
+- Session management (4)
 - State management (4)
 - Validation (3)
 - Package management (3)
+- Breaking changes (2: fix, list available)
 - Backup/restore (2)
 
 ### Key Features
@@ -234,11 +277,18 @@ npm run build
 - ✅ **Comprehensive errors**: Detailed diagnostics
 - ✅ **Next-step recommendations**: Always know what to do next
 
+### chat start example
+
+```text
+migrate angular application from version 14 to version 15 use mcp were it is possible. In case the mcp returns error - stop the work and wait for my reaction (approve or stop)
+```
+
 ---
 
 ## Support
 
 **Need help?**
+
 - Check [Troubleshooting](../packages/mcp-server/README.md#troubleshooting)
 - Review IDE logs for detailed errors
 - Verify Node.js v22 is installed

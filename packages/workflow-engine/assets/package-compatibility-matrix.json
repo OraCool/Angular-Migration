@@ -26,6 +26,7 @@
         "@ag-grid-enterprise/row-grouping": "~28.2.1",
         "@ngx-translate/core": "14.0.0",
         "@ngx-translate/http-loader": "7.0.0",
+        "@swimlane/ngx-graph": "8.0.2",
         "highcharts": "9.3.3",
         "highcharts-angular": "3.1.2",
         "ngx-infinite-scroll": "14.0.1",
@@ -57,12 +58,13 @@
         "@ag-grid-enterprise/row-grouping": "~29.3.5",
         "@ngx-translate/core": "14.0.0",
         "@ngx-translate/http-loader": "7.0.0",
+        "@swimlane/ngx-graph": "8.4.0",
         "highcharts": "10.3.3",
         "highcharts-angular": "3.1.2",
         "ngx-infinite-scroll": "15.0.0",
         "ngx-material-timepicker": "13.1.0"
       },
-      "notes": "Angular 15 - Material chips API changed, ag-grid v29+"
+      "notes": "Angular 15 - Material chips API changed, ag-grid v29+. Updated ngx-graph to 8.4.0 (supports Angular >=10)"
     },
     "16": {
       "angular": {
@@ -88,6 +90,7 @@
         "@ag-grid-enterprise/row-grouping": "~30.2.1",
         "@ngx-translate/core": "15.0.0",
         "@ngx-translate/http-loader": "8.0.0",
+        "@swimlane/ngx-graph": "8.4.0",
         "highcharts": "11.2.0",
         "highcharts-angular": "4.0.0",
         "ngx-infinite-scroll": "16.0.0",
@@ -96,7 +99,7 @@
       "removed": [
         "ngx-perfect-scrollbar"
       ],
-      "notes": "Angular 16 - Remove ngx-perfect-scrollbar (Ivy incompatible), ag-grid v30+"
+      "notes": "Angular 16 - Remove ngx-perfect-scrollbar (Ivy incompatible), ag-grid v30+. Updated ngx-graph to 8.4.0 (supports Angular >=10)"
     },
     "17": {
       "angular": {
@@ -122,12 +125,16 @@
         "@ag-grid-enterprise/row-grouping": "~31.0.3",
         "@ngx-translate/core": "15.0.0",
         "@ngx-translate/http-loader": "8.0.0",
+        "@swimlane/ngx-graph": "8.4.0",
         "highcharts": "11.2.0",
         "highcharts-angular": "4.0.0",
         "ngx-infinite-scroll": "17.0.0",
         "ngx-material-timepicker": "13.1.0"
       },
-      "notes": "Angular 17 - Standalone by default, ag-grid v31+"
+      "removed": [
+        "ngx-perfect-scrollbar"
+      ],
+      "notes": "Angular 17 - Standalone by default, ag-grid v31+. Updated ngx-graph to 8.4.0 (supports Angular >=10)"
     },
     "18": {
       "angular": {
@@ -153,12 +160,16 @@
         "@ag-grid-enterprise/row-grouping": "~31.3.2",
         "@ngx-translate/core": "15.0.0",
         "@ngx-translate/http-loader": "8.0.0",
+        "@swimlane/ngx-graph": "9.0.0",
         "highcharts": "11.4.0",
         "highcharts-angular": "4.0.1",
         "ngx-infinite-scroll": "18.0.0",
         "ngx-material-timepicker": "13.1.0"
       },
-      "notes": "Angular 18 - Signals improvements"
+      "removed": [
+        "ngx-perfect-scrollbar"
+      ],
+      "notes": "Angular 18 - Signals improvements. Updated ngx-graph to 9.0.0 (supports Angular 18+)"
     },
     "19": {
       "angular": {
@@ -184,12 +195,16 @@
         "@ag-grid-enterprise/row-grouping": "~32.2.1",
         "@ngx-translate/core": "16.0.0",
         "@ngx-translate/http-loader": "9.0.0",
+        "@swimlane/ngx-graph": "10.0.0",
         "highcharts": "11.4.8",
         "highcharts-angular": "4.0.1",
         "ngx-infinite-scroll": "18.0.0",
         "ngx-material-timepicker": "13.1.0"
       },
-      "notes": "Angular 19 - Incremental hydration"
+      "removed": [
+        "ngx-perfect-scrollbar"
+      ],
+      "notes": "Angular 19 - Incremental hydration. Updated ngx-graph to 10.0.0 (supports Angular 19)"
     },
     "20": {
       "angular": {
@@ -215,12 +230,16 @@
         "@ag-grid-enterprise/row-grouping": "~32.2.1",
         "@ngx-translate/core": "16.0.0",
         "@ngx-translate/http-loader": "9.0.0",
+        "@swimlane/ngx-graph": "11.0.0",
         "highcharts": "11.4.8",
         "highcharts-angular": "4.0.1",
         "ngx-infinite-scroll": "18.0.0",
         "ngx-material-timepicker": "13.1.0"
       },
-      "notes": "Angular 20 - Latest version"
+      "removed": [
+        "ngx-perfect-scrollbar"
+      ],
+      "notes": "Angular 20 - Latest version. Updated ngx-graph to 11.0.0 (supports Angular 20)"
     }
   },
   "unchangedPackages": {

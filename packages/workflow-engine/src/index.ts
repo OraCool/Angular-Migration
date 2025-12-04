@@ -56,6 +56,15 @@ export {
 
 export type { StageDefinition } from './engine/workflow-stages.js';
 
+// Subtask definitions and utilities for granular control
+export {
+  VERSION_UPGRADE_SUBTASKS,
+  getSubtasksByStageId,
+  getSubtaskById,
+} from './engine/workflow-stages.js';
+
+export type { SubtaskDefinition } from './engine/workflow-stages.js';
+
 // Cross-platform utilities
 export {
   getPlatform,
