@@ -213,8 +213,13 @@ function Fix-Angular16BreakingChanges {
             # Remove PerfectScrollbar import statement
             $content = $content -replace "import\s*\{[^}]*PerfectScrollbar[^}]*\}\s*from\s*['""]ngx-perfect-scrollbar['""];\s*`n?", ""
 
-            # Remove from imports/exports arrays
-            $content = $content -replace ',?\s*PerfectScrollbarModule\s*,?', ''
+            # Remove from imports/exports arrays (handle commas correctly)
+            # Pattern 1: PerfectScrollbarModule followed by comma
+            $content = $content -replace 'PerfectScrollbarModule\s*,\s*', ''
+            # Pattern 2: Comma followed by PerfectScrollbarModule (at end of array)
+            $content = $content -replace ',\s*PerfectScrollbarModule\s*(?=\])', ''
+            # Pattern 3: Standalone PerfectScrollbarModule (only item in array)
+            $content = $content -replace 'PerfectScrollbarModule', ''
 
             if ($content -ne $original) {
                 Set-Content -Path $file -Value $content -NoNewline
