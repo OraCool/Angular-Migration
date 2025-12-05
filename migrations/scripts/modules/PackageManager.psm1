@@ -359,10 +359,10 @@ function Remove-PackageLockFiles {
         [string]$ProjectPath,
 
         [Parameter(Mandatory = $false)]
-        [switch]$RemoveNodeModules = $true,
+        [switch]$RemoveNodeModules,
 
         [Parameter(Mandatory = $false)]
-        [switch]$RemoveLockFile = $true
+        [switch]$RemoveLockFile
     )
 
     Write-InfoMessage "🧹 Cleaning package files..."

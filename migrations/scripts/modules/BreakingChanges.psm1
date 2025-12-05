@@ -139,9 +139,10 @@ function Find-AndReplace {
 
 .DESCRIPTION
     Fixes for Angular 16:
-    - Material Chips API changes (mat-chip-list → mat-chip-set)
-    - Remove ngx-perfect-scrollbar
-    - Replace with native CSS scrolling
+    - Migrate Sass @import to @use for Material themes
+    - Add warnings about View Engine removal
+    - Add warnings about deprecated ripple properties
+    - Note: Material Chips API migration (mat-chip-list → mat-chip-set) was in v15, not v16!
 
 .PARAMETER ProjectPath
     Path to the Angular project.
@@ -166,70 +167,63 @@ function Fix-Angular16BreakingChanges {
     try {
         $srcPath = Join-Path $ProjectPath "src"
 
-        # 1. Fix Angular Material Chips API in HTML files
-        Write-InfoMessage "📝 Fixing Angular Material Chips API..."
+        # 1. Migrate Sass @import to @use for Angular Material themes
+        Write-InfoMessage "📝 Migrating Sass @import to @use for Material themes..."
 
-        $chipReplacements = @(
-            @{ Pattern = '<mat-chip-list'; Replacement = '<mat-chip-set'; Ext = @('.html') },
-            @{ Pattern = '</mat-chip-list>'; Replacement = '</mat-chip-set>'; Ext = @('.html') },
-            @{ Pattern = '<mat-chip\s'; Replacement = '<mat-chip-option '; Ext = @('.html') },
-            @{ Pattern = '</mat-chip>'; Replacement = '</mat-chip-option>'; Ext = @('.html') },
-            @{ Pattern = 'mat-chip-list'; Replacement = 'mat-chip-set'; Ext = @('.scss', '.css') }
-        )
+        $scssFiles = Find-ProjectFiles -Path $srcPath -FileExtensions @('.scss')
+        $sassFilesFixed = 0
 
-        foreach ($replacement in $chipReplacements) {
-            $modifiedFiles = Find-AndReplace -Path $srcPath `
-                                              -Pattern $replacement.Pattern `
-                                              -Replacement $replacement.Replacement `
-                                              -FileExtensions $replacement.Ext
-
-            if ($modifiedFiles.Count -gt 0) {
-                $changes += "Updated Material Chips API in $($modifiedFiles.Count) files"
-                Write-Verbose "  Modified: $($modifiedFiles -join ', ')"
-            }
-        }
-
-        # 2. Remove ngx-perfect-scrollbar from package.json
-        Write-InfoMessage "📝 Removing ngx-perfect-scrollbar..."
-        $packageJsonPath = Join-Path $ProjectPath "package.json"
-
-        if (Test-Path $packageJsonPath) {
-            $packageJson = Get-Content -Path $packageJsonPath -Raw | ConvertFrom-Json
-
-            if ($packageJson.dependencies.PSObject.Properties.Name -contains 'ngx-perfect-scrollbar') {
-                $packageJson.dependencies.PSObject.Properties.Remove('ngx-perfect-scrollbar')
-                $packageJson | ConvertTo-Json -Depth 10 | Set-Content -Path $packageJsonPath
-                $changes += "Removed ngx-perfect-scrollbar from package.json"
-            }
-        }
-
-        # 3. Remove PerfectScrollbarModule imports from module files
-        Write-InfoMessage "📝 Removing PerfectScrollbarModule imports..."
-        $moduleFiles = Find-ProjectFiles -Path $srcPath -FileExtensions @('.ts') |
-                       Where-Object { $_ -match '\.module\.ts$' }
-
-        foreach ($file in $moduleFiles) {
+        foreach ($file in $scssFiles) {
             $content = Get-Content -Path $file -Raw
-            $original = $content
+            $originalContent = $content
 
-            # Remove import statement
-            $content = $content -replace "import\s*\{[^}]*PerfectScrollbarModule[^}]*\}\s*from\s*['""][^'""]*['""];\s*`n?", ""
+            # Replace @import with @use for Material theme files
+            $content = $content -replace "@import\s+['""]~?@angular/material/theming['""]", "@use '@angular/material' as mat"
+            $content = $content -replace "@import\s+['""]~?@angular/material/prebuilt-themes/[^'""]+['""]", "@use '@angular/material' as mat"
 
-            # Remove from imports array
-            $content = $content -replace ',?\s*PerfectScrollbarModule\s*,?', ''
+            # Replace common theme function calls
+            $content = $content -replace "\bmat-palette\(", "mat.define-palette("
+            $content = $content -replace "\bmat-light-theme\(", "mat.define-light-theme("
+            $content = $content -replace "\bmat-dark-theme\(", "mat.define-dark-theme("
+            $content = $content -replace "\bmat-typography-config\(", "mat.define-typography-config("
 
-            if ($content -ne $original) {
+            if ($content -ne $originalContent) {
                 Set-Content -Path $file -Value $content -NoNewline
-                $changes += "Removed PerfectScrollbarModule from $([System.IO.Path]::GetFileName($file))"
+                $sassFilesFixed++
+                $changes += "Migrated Sass @import to @use in: $([System.IO.Path]::GetFileName($file))"
             }
         }
 
-        Write-Success "Angular 16 breaking changes fixed successfully"
+        if ($sassFilesFixed -gt 0) {
+            Write-Success "  Migrated $sassFilesFixed Sass file(s) to @use syntax"
+        } else {
+            Write-InfoMessage "  No Sass @import statements found that need migration"
+        }
+
+        # 2. Add warnings about breaking changes that require manual intervention
+        $warnings += "Angular 16 Breaking Changes - Manual Review Required:"
+        $warnings += "  - TypeScript 4.9+ is now required"
+        $warnings += "  - Zone.js 0.11.x and 0.12.x are no longer supported (use 0.13+)"
+        $warnings += "  - View Engine (ngcc) has been removed - ensure all dependencies are Ivy-compatible"
+        $warnings += "  - Deprecated: ripple property on MatButton, MatCheckbox, MatChip"
+        $warnings += "  - entryComponents deleted from @NgModule and @Component APIs"
+        $warnings += "  - XhrFactory export from @angular/common/http has been removed"
+        $warnings += "  - Material theme mixins now have stricter validation - review custom themes"
+        $warnings += "  - If using Sass @import for Material themes, migrate to @use (attempted above)"
+
+        Write-Success "Angular 16 breaking changes processed successfully"
         Write-InfoMessage "  Total changes: $($changes.Count)"
+
+        if ($warnings.Count -gt 0) {
+            Write-WarningMessage "`nImportant Warnings:"
+            foreach ($warning in $warnings) {
+                Write-WarningMessage "  $warning"
+            }
+        }
 
         return @{
             Success  = $true
-            Message  = "Angular 16 breaking changes fixed successfully"
+            Message  = "Angular 16 breaking changes processed successfully"
             Changes  = $changes
             Warnings = $warnings
             Errors   = $errors
@@ -513,18 +507,80 @@ function Fix-Angular15BreakingChanges {
     $changes = @()
     $warnings = @()
 
-    Write-InfoMessage "🔧 Checking Angular 15 breaking changes..."
+    Write-InfoMessage "🔧 Applying Angular 15 breaking changes..."
 
-    # Angular 15 breaking changes are mostly handled by ng update schematics
+    # Material 15 Chips API Migration
+    Write-InfoMessage "  Migrating Material Chips API (mat-chip-list → mat-chip-set)..."
+
+    # Find all HTML files
+    $htmlFiles = Find-ProjectFiles -Path $ProjectPath -FileExtensions @('.html')
+    $chipFilesFixed = 0
+
+    foreach ($file in $htmlFiles) {
+        $content = Get-Content -Path $file -Raw
+        $originalContent = $content
+
+        # Replace mat-chip-list with mat-chip-set
+        $content = $content -replace '<mat-chip-list\s', '<mat-chip-set '
+        $content = $content -replace '</mat-chip-list>', '</mat-chip-set>'
+
+        # Replace mat-chip-list attributes
+        $content = $content -replace '\#chipList', '#chipSet'
+        $content = $content -replace 'chipList', 'chipSet'
+
+        # Note: mat-chip usually becomes mat-chip-option inside chip sets
+        # but we need to be careful - standalone mat-chip might stay as is
+        # The ng update schematic should handle this, but if not:
+        # $content = $content -replace '<mat-chip\s', '<mat-chip-option '
+        # $content = $content -replace '</mat-chip>', '</mat-chip-option>'
+
+        if ($content -ne $originalContent) {
+            Set-Content -Path $file -Value $content -NoNewline
+            $chipFilesFixed++
+            $changes += "Updated Material Chips API in: $file"
+        }
+    }
+
+    if ($chipFilesFixed -gt 0) {
+        Write-Success "  Fixed Material Chips API in $chipFilesFixed file(s)"
+    }
+    else {
+        Write-InfoMessage "  No Material Chips API usage found"
+    }
+
+    # TypeScript imports migration
+    Write-InfoMessage "  Updating TypeScript imports..."
+    $tsFiles = Find-ProjectFiles -Path $ProjectPath -FileExtensions @('.ts')
+    $importFilesFixed = 0
+
+    foreach ($file in $tsFiles) {
+        $content = Get-Content -Path $file -Raw
+        $originalContent = $content
+
+        # Replace MatChipList imports
+        $content = $content -replace 'MatChipList', 'MatChipSet'
+        $content = $content -replace 'MatChipListModule', 'MatChipsModule'
+
+        if ($content -ne $originalContent) {
+            Set-Content -Path $file -Value $content -NoNewline
+            $importFilesFixed++
+            $changes += "Updated imports in: $file"
+        }
+    }
+
+    if ($importFilesFixed -gt 0) {
+        Write-Success "  Fixed imports in $importFilesFixed file(s)"
+    }
+
     $warnings += "Angular 15 introduces standalone components (optional)"
     $warnings += "TypeScript 4.8+ is required"
-    $warnings += "Most breaking changes are handled automatically by 'ng update'"
+    $warnings += "Review Material Chips changes - some mat-chip may need to be mat-chip-option"
 
-    Write-Success "Angular 15 breaking changes review completed"
+    Write-Success "Angular 15 breaking changes applied successfully"
 
     return @{
         Success  = $true
-        Message  = "Angular 15 breaking changes review completed"
+        Message  = "Angular 15 breaking changes applied ($($changes.Count) changes)"
         Changes  = $changes
         Warnings = $warnings
         Errors   = @()

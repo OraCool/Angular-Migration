@@ -22,7 +22,7 @@ $ValidationModule = Join-Path $PSScriptRoot "Validation.psm1"
 
 Import-Module $UtilitiesModule -DisableNameChecking
 Import-Module $PackageManagerModule -DisableNameChecking
-Import-Module $BreakingChangesModule -DisableNameChecking
+Import-Module $BreakingChangesModule -DisableNameChecking -Force
 Import-Module $ValidationModule -DisableNameChecking
 
 #region Prerequisites Testing
@@ -346,6 +346,15 @@ function Invoke-MaterialUpdate {
 .PARAMETER TargetVersion
     Target Angular version.
 
+.PARAMETER SkipClean
+    Skip cleaning package files before install (keeps both node_modules and package-lock.json).
+
+.PARAMETER CleanNodeModules
+    Also remove node_modules directory during clean step (by default only package-lock.json is removed).
+
+.PARAMETER SkipInstall
+    Skip running npm install.
+
 .PARAMETER SkipTests
     Skip test validation.
 
@@ -360,6 +369,15 @@ function Invoke-MaterialUpdate {
 
 .EXAMPLE
     $result = Invoke-AngularMigration -ProjectPath "C:\MyProject" -TargetVersion "16" -AutoCommit
+
+.EXAMPLE
+    $result = Invoke-AngularMigration -ProjectPath "C:\MyProject" -TargetVersion "16" -SkipClean
+
+.EXAMPLE
+    $result = Invoke-AngularMigration -ProjectPath "C:\MyProject" -TargetVersion "16" -CleanNodeModules
+
+.EXAMPLE
+    $result = Invoke-AngularMigration -ProjectPath "C:\MyProject" -TargetVersion "16" -SkipInstall
 #>
 function Invoke-AngularMigration {
     [CmdletBinding()]
@@ -371,6 +389,15 @@ function Invoke-AngularMigration {
         [Parameter(Mandatory = $true)]
         [ValidateSet("15", "16", "17", "18", "19", "20")]
         [string]$TargetVersion,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipClean = $false,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$KeepNodeModules = $false,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipInstall = $false,
 
         [Parameter(Mandatory = $false)]
         [switch]$SkipTests = $false,
@@ -408,13 +435,42 @@ function Invoke-AngularMigration {
             throw "Failed to update package.json"
         }
 
-        # Step 3: Install dependencies
-        Write-InfoMessage "`n[Step 3/8] Installing dependencies..."
-        $installResult = Install-Dependencies -ProjectPath $ProjectPath
-        $results['Install'] = $installResult
+        # Step 3a: Clean package files (optional)
+        if (-not $SkipClean) {
+            Write-InfoMessage "`n[Step 3a/8] Cleaning package files..."
 
-        if (-not $installResult.Success) {
-            throw "Failed to install dependencies"
+            # By default: remove both node_modules and package-lock.json to prevent dependency conflicts
+            # With -KeepNodeModules: only remove package-lock.json
+            if ($KeepNodeModules) {
+                Write-InfoMessage "  Keeping node_modules (only removing package-lock.json)"
+                $cleanResult = Remove-PackageLockFiles -ProjectPath $ProjectPath -RemoveLockFile
+            }
+            else {
+                Write-InfoMessage "  Removing both node_modules and package-lock.json for clean install"
+                $cleanResult = Remove-PackageLockFiles -ProjectPath $ProjectPath -RemoveNodeModules -RemoveLockFile
+            }
+
+            if (-not $cleanResult) {
+                Write-WarningMessage "  Failed to clean some files, but continuing..."
+            }
+        }
+        else {
+            Write-WarningMessage "`n[Step 3a/8] Skipping clean (keeping existing node_modules and package-lock.json)"
+        }
+
+        # Step 3b: Install dependencies (optional)
+        if (-not $SkipInstall) {
+            Write-InfoMessage "`n[Step 3b/8] Installing dependencies..."
+            $installResult = Install-Dependencies -ProjectPath $ProjectPath
+            $results['Install'] = $installResult
+
+            if (-not $installResult.Success) {
+                throw "Failed to install dependencies"
+            }
+        }
+        else {
+            Write-WarningMessage "`n[Step 3b/8] Skipping dependency installation (will use existing node_modules)"
+            $results['Install'] = @{ Success = $true; Message = "Skipped" }
         }
 
         # Step 4: Apply breaking changes fixes
@@ -458,6 +514,18 @@ function Invoke-AngularMigration {
             $commitMessage = "chore: migrate to Angular $TargetVersion"
             $commitResult = Invoke-GitCommit -ProjectPath $ProjectPath -Message $commitMessage -AddAll
             $results['Commit'] = @{ Success = $commitResult }
+        }
+
+        # Clean up backup file after successful migration
+        $backupFile = Join-Path $ProjectPath "package.json.backup"
+        if (Test-Path $backupFile) {
+            try {
+                Remove-Item -Path $backupFile -Force
+                Write-InfoMessage "`nCleaned up package.json.backup"
+            }
+            catch {
+                Write-WarningMessage "  Could not remove package.json.backup: $_"
+            }
         }
 
         $duration = (Get-Date) - $startTime

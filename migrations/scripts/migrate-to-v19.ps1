@@ -9,6 +9,9 @@
 .PARAMETER ProjectPath
     Path to the Angular project (default: current directory).
 
+.PARAMETER SkipInstall
+    Skip removing node_modules and running npm install (uses existing dependencies).
+
 .PARAMETER SkipTests
     Skip running tests after migration.
 
@@ -24,6 +27,9 @@
 .EXAMPLE
     .\migrate-to-v19.ps1 -ProjectPath "C:\MyProject" -AutoCommit -SkipTests
 
+.EXAMPLE
+    .\migrate-to-v19.ps1 -ProjectPath "C:\MyProject" -SkipInstall
+
 .NOTES
     Part of Angular Migration Toolkit
     Author: Angular Migration Toolkit
@@ -37,6 +43,15 @@ param(
     [string]$ProjectPath = ".",
 
     [Parameter(Mandatory = $false)]
+    [switch]$SkipClean = $false,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$KeepNodeModules = $false,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipInstall = $false,
+
+    [Parameter(Mandatory = $false)]
     [switch]$SkipTests = $false,
 
     [Parameter(Mandatory = $false)]
@@ -45,7 +60,6 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$AutoCommit = $false
 )
-
 $ErrorActionPreference = 'Stop'
 
 # Import modules
@@ -86,6 +100,9 @@ try {
     $result = Invoke-AngularMigration `
         -ProjectPath $ProjectPath `
         -TargetVersion "19" `
+        -SkipClean:$SkipClean `
+        -KeepNodeModules:$KeepNodeModules `
+        -SkipInstall:$SkipInstall `
         -SkipTests:$SkipTests `
         -SkipLint:$SkipLint `
         -AutoCommit:$AutoCommit
@@ -98,9 +115,9 @@ try {
         Write-InfoMessage "  1. Review the changes: git diff"
         Write-InfoMessage "  2. Test your application thoroughly"
         Write-InfoMessage "  3. Commit the changes: git add . && git commit -m 'chore: migrate to Angular 19'"
-        Write-InfoMessage ""
+        Write-Host ""
         Write-InfoMessage "To continue migration:"
-        Write-InfoMessage "  .\migrate-to-v17.ps1 -ProjectPath '$ProjectPath'"
+        Write-InfoMessage "  .\migrate-to-v20.ps1 -ProjectPath '$ProjectPath'"
         exit 0
     }
     else {
