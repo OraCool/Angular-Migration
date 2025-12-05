@@ -200,7 +200,78 @@ function Fix-Angular16BreakingChanges {
             Write-InfoMessage "  No Sass @import statements found that need migration"
         }
 
-        # 2. Add warnings about breaking changes that require manual intervention
+        # 2. Remove PerfectScrollbar (no longer needed, use native CSS scrolling)
+        Write-InfoMessage "📝 Removing PerfectScrollbar imports from modules..."
+        $moduleFiles = Find-ProjectFiles -Path $srcPath -FileExtensions @('.ts') |
+                       Where-Object { $_ -match '\.module\.ts$' }
+
+        $perfectScrollbarRemoved = 0
+        foreach ($file in $moduleFiles) {
+            $content = Get-Content -Path $file -Raw
+            $original = $content
+
+            # Remove PerfectScrollbar import statement
+            $content = $content -replace "import\s*\{[^}]*PerfectScrollbar[^}]*\}\s*from\s*['""]ngx-perfect-scrollbar['""];\s*`n?", ""
+
+            # Remove from imports/exports arrays
+            $content = $content -replace ',?\s*PerfectScrollbarModule\s*,?', ''
+
+            if ($content -ne $original) {
+                Set-Content -Path $file -Value $content -NoNewline
+                $perfectScrollbarRemoved++
+                $changes += "Removed PerfectScrollbarModule from $([System.IO.Path]::GetFileName($file))"
+            }
+        }
+
+        if ($perfectScrollbarRemoved -gt 0) {
+            Write-Success "  Removed PerfectScrollbar from $perfectScrollbarRemoved module(s)"
+        } else {
+            Write-InfoMessage "  No PerfectScrollbar imports found"
+        }
+
+        # 3. Update ScrollableContainerComponent to use native CSS scrolling
+        Write-InfoMessage "📝 Updating ScrollableContainerComponent to use native CSS scrolling..."
+        $scrollableComponentPath = Join-Path $srcPath "app/shared/components/scrollable-container/scrollable-container.component.ts"
+
+        if (Test-Path $scrollableComponentPath) {
+            $content = Get-Content -Path $scrollableComponentPath -Raw
+            $original = $content
+
+            # Remove PerfectScrollbar import
+            $content = $content -replace "import\s*\{[^}]*PerfectScrollbar[^}]*\}\s*from\s*['""]ngx-perfect-scrollbar['""];\s*`n?", ""
+
+            # Replace PerfectScrollbar config with simple inputs
+            $content = $content -replace "@Input\(\)\s+config\?:\s*PerfectScrollbarConfigInterface;", "@Input() suppressScrollX: boolean = false;`n  @Input() suppressScrollY: boolean = false;"
+
+            # Remove scrollbarConfig property
+            $content = $content -replace "scrollbarConfig:\s*PerfectScrollbarConfigInterface\s*=\s*\{[^}]+\};", ""
+
+            if ($content -ne $original) {
+                Set-Content -Path $scrollableComponentPath -Value $content -NoNewline
+                $changes += "Updated ScrollableContainerComponent to use native CSS scrolling"
+                Write-Success "  Updated ScrollableContainerComponent"
+            }
+        }
+
+        # Update ScrollableContainerComponent HTML template
+        $scrollableTemplatePath = Join-Path $srcPath "app/shared/components/scrollable-container/scrollable-container.component.html"
+
+        if (Test-Path $scrollableTemplatePath) {
+            $content = Get-Content -Path $scrollableTemplatePath -Raw
+            $original = $content
+
+            # Replace perfectScrollbar directive with native CSS overflow
+            $content = $content -replace '\[perfectScrollbar\]="scrollbarConfig"', '[style.overflow-x]="suppressScrollX ? ''hidden'' : ''auto''"[NEWLINE]  [style.overflow-y]="suppressScrollY ? ''hidden'' : ''auto''"'
+            $content = $content -replace '\[NEWLINE\]', "`n"
+
+            if ($content -ne $original) {
+                Set-Content -Path $scrollableTemplatePath -Value $content -NoNewline
+                $changes += "Updated ScrollableContainerComponent template"
+                Write-Success "  Updated ScrollableContainerComponent template"
+            }
+        }
+
+        # 4. Add warnings about breaking changes that require manual intervention
         $warnings += "Angular 16 Breaking Changes - Manual Review Required:"
         $warnings += "  - TypeScript 4.9+ is now required"
         $warnings += "  - Zone.js 0.11.x and 0.12.x are no longer supported (use 0.13+)"
