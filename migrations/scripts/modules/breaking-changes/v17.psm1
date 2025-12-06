@@ -4,6 +4,7 @@
 
 .DESCRIPTION
     Handles breaking changes introduced in Angular 17:
+    - Auto-fix angular.json configuration (browserTarget → buildTarget)
     - Auto-fix Zone.js deep imports (zone.js/bundles → zone.js)
     - Detect and warn about Material MDC migration requirement
     - Warn about Router API removals (setupTestingRouter, malformedUriErrorHandler)
@@ -265,6 +266,36 @@ function Invoke-Angular17BreakingChanges {
             catch {
                 Write-Verbose "Error checking Material usage: $_"
                 $warnings += "Could not verify Material MDC migration status"
+            }
+        }
+
+        # ============================================================================
+        # SECTION 1.5: angular.json browserTarget → buildTarget Migration
+        # ============================================================================
+
+        Write-InfoMessage "📝 Updating angular.json configuration..."
+
+        $angularJsonPath = Join-Path $ProjectPath "angular.json"
+        if (Test-Path $angularJsonPath) {
+            try {
+                $angularJsonContent = Get-Content -Path $angularJsonPath -Raw
+                $originalAngularJson = $angularJsonContent
+
+                # Replace browserTarget with buildTarget (Angular 17+ requirement)
+                # This affects serve, extract-i18n, and other configurations
+                $angularJsonContent = $angularJsonContent -replace '"browserTarget":', '"buildTarget":'
+
+                if ($angularJsonContent -ne $originalAngularJson) {
+                    Set-Content -Path $angularJsonPath -Value $angularJsonContent -NoNewline
+                    Write-Success "  ✓ Updated angular.json: browserTarget → buildTarget"
+                    $changes += "Updated angular.json configuration (browserTarget → buildTarget)"
+                } else {
+                    Write-InfoMessage "  ✓ angular.json already up-to-date"
+                }
+            }
+            catch {
+                Write-WarningMessage "  Failed to update angular.json: $_"
+                $warnings += "Could not update angular.json browserTarget property"
             }
         }
 
