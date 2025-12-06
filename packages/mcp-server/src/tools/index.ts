@@ -12,12 +12,54 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { SessionManager } from '../session/manager.js';
-import { ToolResult, ProgressCallback, ProgressUpdate } from '../types.js';
+import { ToolResult, ProgressCallback, ProgressUpdate, StandardToolResponse, StandardErrorResponse } from '../types.js';
 import {
   createProgressCallback,
   createBufferingProgressCallback,
   createNoOpProgressCallback,
 } from '../utils/streaming.js';
+
+/**
+ * Convert StandardToolResponse/StandardErrorResponse to legacy ToolResult format
+ * This provides backward compatibility while supporting the new spec format
+ */
+function convertToLegacyFormat(response: StandardToolResponse | StandardErrorResponse): ToolResult {
+  if (response.status === 'error') {
+    const errorResponse = response as StandardErrorResponse;
+    return {
+      success: false,
+      error: errorResponse.error.message,
+      message: errorResponse.error.details,
+      details: {
+        code: errorResponse.error.code,
+        details: errorResponse.error.details,
+      },
+      nextStep: {
+        action: errorResponse.nextAction,
+        description: errorResponse.nextAction,
+        reasoning: errorResponse.instructionRef || '',
+      },
+    };
+  }
+
+  const successResponse = response as StandardToolResponse;
+  return {
+    success: successResponse.status === 'success',
+    data: successResponse.data,
+    message: successResponse.nextAction,
+    nextStep: {
+      action: successResponse.nextAction,
+      description: successResponse.nextAction,
+      reasoning: successResponse.instructionRef || '',
+      optional: successResponse.userAction ? [
+        {
+          action: successResponse.userAction,
+          description: 'User action required',
+        },
+      ] : undefined,
+    },
+  };
+}
 
 // Import tool handlers
 import * as migrationStageTools from './migration-stages.js';
@@ -27,6 +69,8 @@ import * as packageTools from './packages.js';
 import * as backupRestoreTools from './backup-restore.js';
 import * as sessionTools from './session.js';
 import * as breakingChangesTools from './breaking-changes.js';
+import * as analysisPlanningTools from './analysis-planning.js';
+import * as breakingChangesDetectionTools from './breaking-changes-detection.js';
 
 /**
  * Register all tools with the MCP server
@@ -385,6 +429,94 @@ session_create({ "projectPath": "C:\\\\Users\\\\jane\\\\myapp" })`,
   );
 
   // ========================================
+  // ANALYSIS & PLANNING TOOLS (New from spec)
+  // ========================================
+
+  mcpServer.registerTool(
+    'analyze_project_version',
+    {
+      title: 'Analyze Project Version',
+      description: 'Detect current Angular version and determine upgrade path',
+      inputSchema: {
+        projectPath: z.string().optional().describe('Path to Angular project (defaults to current directory)'),
+      },
+    },
+    async ({ projectPath }) => {
+      const result = await analysisPlanningTools.handleAnalysisPlanningTool('analyze_project_version', { projectPath }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'check_migration_prerequisites',
+    {
+      title: 'Check Migration Prerequisites',
+      description: 'Validate project is ready for migration',
+      inputSchema: {
+        projectPath: z.string().optional().describe('Path to project (defaults to current directory)'),
+        targetVersion: z.string().describe('Target Angular version (e.g., "20")'),
+      },
+    },
+    async ({ projectPath, targetVersion }) => {
+      const result = await analysisPlanningTools.handleAnalysisPlanningTool('check_migration_prerequisites', { projectPath, targetVersion }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'generate_migration_plan',
+    {
+      title: 'Generate Migration Plan',
+      description: 'Create comprehensive step-by-step migration plan',
+      inputSchema: {
+        fromVersion: z.string().describe('Source Angular version (e.g., "15")'),
+        toVersion: z.string().describe('Target Angular version (e.g., "20")'),
+        includeOptional: z.boolean().optional().describe('Include optional migrations (default: false)'),
+      },
+    },
+    async ({ fromVersion, toVersion, includeOptional }) => {
+      const result = await analysisPlanningTools.handleAnalysisPlanningTool('generate_migration_plan', { fromVersion, toVersion, includeOptional }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ========================================
+  // BREAKING CHANGES DETECTION TOOLS (New from spec)
+  // ========================================
+
+  mcpServer.registerTool(
+    'detect_breaking_changes',
+    {
+      title: 'Detect Breaking Changes',
+      description: 'Scan codebase for version-specific breaking changes using AST analysis',
+      inputSchema: {
+        fromVersion: z.string().describe('Source Angular version (e.g., "17")'),
+        toVersion: z.string().describe('Target Angular version (e.g., "18")'),
+        projectPath: z.string().optional().describe('Path to project (defaults to current directory)'),
+      },
+    },
+    async ({ fromVersion, toVersion, projectPath }) => {
+      const result = await breakingChangesDetectionTools.handleBreakingChangesDetectionTool('detect_breaking_changes', { fromVersion, toVersion, projectPath }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  mcpServer.registerTool(
+    'get_breaking_changes_documentation',
+    {
+      title: 'Get Breaking Changes Documentation',
+      description: 'Retrieve version-specific breaking changes documentation',
+      inputSchema: {
+        version: z.string().describe('Angular version (e.g., "18")'),
+      },
+    },
+    async ({ version }) => {
+      const result = await breakingChangesDetectionTools.handleBreakingChangesDetectionTool('get_breaking_changes_documentation', { version }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ========================================
   // BACKUP AND RESTORE TOOLS
   // ========================================
 
@@ -500,6 +632,12 @@ session_create({ "projectPath": "C:\\\\Users\\\\jane\\\\myapp" })`,
         result = await backupRestoreTools.handleBackupRestoreTool(name, toolArgs, sessionManager, progressCallback);
       } else if (name.startsWith('breaking_changes_')) {
         result = await breakingChangesTools.handleBreakingChangesTool(name, toolArgs, sessionManager, progressCallback);
+      } else if (name === 'analyze_project_version' || name === 'check_migration_prerequisites' || name === 'generate_migration_plan') {
+        const standardResult = await analysisPlanningTools.handleAnalysisPlanningTool(name, toolArgs, sessionManager, progressCallback);
+        result = convertToLegacyFormat(standardResult);
+      } else if (name === 'detect_breaking_changes' || name === 'get_breaking_changes_documentation') {
+        const standardResult = await breakingChangesDetectionTools.handleBreakingChangesDetectionTool(name, toolArgs, sessionManager, progressCallback);
+        result = convertToLegacyFormat(standardResult);
       } else if (name.startsWith('session_')) {
         result = await sessionTools.handleSessionTool(name, toolArgs, sessionManager, progressCallback);
       } else if (name.startsWith('state_')) {

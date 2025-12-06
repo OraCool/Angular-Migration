@@ -12,6 +12,8 @@ import {
 import { SessionManager } from '../session/manager.js';
 import { ANGULAR_MIGRATION_WORKFLOW } from '@angular-migration/workflow-engine';
 import { BREAKING_CHANGES_DB } from '../tools/packages.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * All available MCP resources
@@ -48,48 +50,130 @@ function getResources(sessionManager: SessionManager): Resource[] {
       mimeType: 'application/json',
     },
 
-    // Breaking changes resources
+    // Breaking changes resources (spec-compliant URIs)
     {
-      uri: 'migration://breaking-changes/overview',
+      uri: 'breaking-changes://overview',
       name: 'Breaking Changes Overview',
       description: 'Overview of all breaking changes across Angular versions 15-20',
       mimeType: 'application/json',
     },
     {
-      uri: 'migration://breaking-changes/15',
+      uri: 'breaking-changes://v15',
       name: 'Angular 15 Breaking Changes',
       description: 'Breaking changes introduced in Angular 15',
-      mimeType: 'application/json',
+      mimeType: 'text/markdown',
     },
     {
-      uri: 'migration://breaking-changes/16',
+      uri: 'breaking-changes://v16',
       name: 'Angular 16 Breaking Changes',
       description: 'Breaking changes introduced in Angular 16',
-      mimeType: 'application/json',
+      mimeType: 'text/markdown',
     },
     {
-      uri: 'migration://breaking-changes/17',
+      uri: 'breaking-changes://v17',
       name: 'Angular 17 Breaking Changes',
       description: 'Breaking changes introduced in Angular 17',
-      mimeType: 'application/json',
+      mimeType: 'text/markdown',
     },
     {
-      uri: 'migration://breaking-changes/18',
+      uri: 'breaking-changes://v18',
       name: 'Angular 18 Breaking Changes',
       description: 'Breaking changes introduced in Angular 18',
-      mimeType: 'application/json',
+      mimeType: 'text/markdown',
     },
     {
-      uri: 'migration://breaking-changes/19',
+      uri: 'breaking-changes://v19',
       name: 'Angular 19 Breaking Changes',
       description: 'Breaking changes introduced in Angular 19',
-      mimeType: 'application/json',
+      mimeType: 'text/markdown',
     },
     {
-      uri: 'migration://breaking-changes/20',
+      uri: 'breaking-changes://v20',
       name: 'Angular 20 Breaking Changes',
       description: 'Breaking changes introduced in Angular 20',
-      mimeType: 'application/json',
+      mimeType: 'text/markdown',
+    },
+
+    // Migration guide resources (spec-compliant URIs)
+    {
+      uri: 'guide://migrate/v15',
+      name: 'Migrate to Angular 15',
+      description: 'Step-by-step guide for migrating to Angular 15',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://migrate/v16',
+      name: 'Migrate to Angular 16',
+      description: 'Step-by-step guide for migrating to Angular 16',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://migrate/v17',
+      name: 'Migrate to Angular 17',
+      description: 'Step-by-step guide for migrating to Angular 17',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://migrate/v18',
+      name: 'Migrate to Angular 18',
+      description: 'Step-by-step guide for migrating to Angular 18',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://migrate/v19',
+      name: 'Migrate to Angular 19',
+      description: 'Step-by-step guide for migrating to Angular 19',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://migrate/v20',
+      name: 'Migrate to Angular 20',
+      description: 'Step-by-step guide for migrating to Angular 20',
+      mimeType: 'text/markdown',
+    },
+
+    // Supplementary documentation resources (spec-compliant URIs)
+    {
+      uri: 'guide://prerequisites',
+      name: 'Migration Prerequisites',
+      description: 'Prerequisites and preparation for migration',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://backup',
+      name: 'Pre-Migration Backup',
+      description: 'Creating backups before migration',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://validation',
+      name: 'Post-Migration Validation',
+      description: 'Validating migration success',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://troubleshooting',
+      name: 'Troubleshooting Guide',
+      description: 'Common issues and solutions',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://standalone-migration',
+      name: 'Standalone Components Migration',
+      description: 'Optional migration to standalone components',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://signals-migration',
+      name: 'Signals Migration',
+      description: 'Optional migration to Angular Signals',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'guide://control-flow-migration',
+      name: 'Control Flow Migration',
+      description: 'Optional migration to new control flow syntax',
+      mimeType: 'text/markdown',
     },
   ];
 
@@ -140,11 +224,28 @@ export function registerResources(
         content = JSON.stringify(getWorkflowDoc(), null, 2);
       } else if (uri === 'migration://docs/compatibility') {
         content = JSON.stringify(getCompatibilityDoc(), null, 2);
-      } else if (uri === 'migration://breaking-changes/overview') {
+      } else if (uri === 'breaking-changes://overview') {
         content = JSON.stringify(getBreakingChangesOverview(), null, 2);
-      } else if (uri.startsWith('migration://breaking-changes/')) {
-        const version = uri.replace('migration://breaking-changes/', '');
-        content = JSON.stringify(getBreakingChangesForVersion(version), null, 2);
+      } else if (uri.startsWith('breaking-changes://v')) {
+        const version = uri.replace('breaking-changes://v', '');
+        content = await getBreakingChangesMarkdown(version);
+      } else if (uri.startsWith('guide://migrate/v')) {
+        const version = uri.replace('guide://migrate/v', '');
+        content = await getMigrationGuideMarkdown(version);
+      } else if (uri === 'guide://prerequisites') {
+        content = await readDocFile('00-prerequisites.md');
+      } else if (uri === 'guide://backup') {
+        content = await readDocFile('01-pre-migration-backup.md');
+      } else if (uri === 'guide://validation') {
+        content = await readDocFile('08-post-migration-validation.md');
+      } else if (uri === 'guide://troubleshooting') {
+        content = await readDocFile('troubleshooting.md');
+      } else if (uri === 'guide://standalone-migration') {
+        content = await readDocFile('optional-standalone-migration.md');
+      } else if (uri === 'guide://signals-migration') {
+        content = await readDocFile('optional-signals-migration.md');
+      } else if (uri === 'guide://control-flow-migration') {
+        content = await readDocFile('optional-control-flow-migration.md');
       } else if (uri.startsWith('migration://sessions/')) {
         const match = uri.match(/migration:\/\/sessions\/([^/]+)\/(state|plan)/);
         if (!match) {
@@ -445,6 +546,92 @@ function getBreakingChangesForVersion(version: string) {
       `Visit https://update.angular.io for interactive migration guide`,
     ],
   };
+}
+
+/**
+ * Read documentation file from migrations/docs
+ */
+async function readDocFile(filename: string): Promise<string> {
+  const docPath = path.join(process.cwd(), 'migrations', 'docs', filename);
+  if (!fs.existsSync(docPath)) {
+    return `# Documentation Not Found\n\nFile: ${filename}\n\nThis documentation file is not yet available.`;
+  }
+  return fs.readFileSync(docPath, 'utf-8');
+}
+
+/**
+ * Get migration guide markdown for a specific version
+ */
+async function getMigrationGuideMarkdown(version: string): Promise<string> {
+  const versionMap: Record<string, string> = {
+    '15': '02-migrate-to-angular-15.md',
+    '16': '03-migrate-to-angular-16.md',
+    '17': '04-migrate-to-angular-17.md',
+    '18': '05-migrate-to-angular-18.md',
+    '19': '06-migrate-to-angular-19.md',
+    '20': '07-migrate-to-angular-20.md',
+  };
+
+  const filename = versionMap[version];
+  if (!filename) {
+    return `# Migration Guide Not Found\n\nNo migration guide available for Angular ${version}`;
+  }
+
+  return readDocFile(filename);
+}
+
+/**
+ * Get breaking changes markdown from PowerShell modules
+ */
+async function getBreakingChangesMarkdown(version: string): Promise<string> {
+  const psPath = path.join(process.cwd(), 'migrations', 'scripts', 'modules', 'breaking-changes', `v${version}.psm1`);
+
+  if (!fs.existsSync(psPath)) {
+    return `# Breaking Changes for Angular ${version}\n\nNo breaking changes documentation available for this version.`;
+  }
+
+  try {
+    const content = fs.readFileSync(psPath, 'utf-8');
+
+    // Extract comments and documentation from PowerShell module
+    const lines = content.split('\n');
+    let markdown = `# Angular ${version} Breaking Changes\n\n`;
+    markdown += `> Extracted from: \`migrations/scripts/modules/breaking-changes/v${version}.psm1\`\n\n`;
+
+    let currentSection = '';
+    let inComment = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Extract comment blocks
+      if (trimmed.startsWith('#')) {
+        const commentText = trimmed.slice(1).trim();
+        if (commentText.length > 0) {
+          markdown += `${commentText}\n`;
+          inComment = true;
+        }
+      } else if (inComment && trimmed.length > 0) {
+        markdown += '\n';
+        inComment = false;
+      }
+
+      // Extract function names as section headers
+      if (trimmed.startsWith('function ')) {
+        const funcName = trimmed.match(/function\s+([A-Za-z0-9-_]+)/)?.[1];
+        if (funcName) {
+          currentSection = funcName.replace(/-/g, ' ');
+          markdown += `\n## ${currentSection}\n\n`;
+        }
+      }
+    }
+
+    markdown += `\n\n---\n\n*For more information, visit: [Angular Update Guide](https://update.angular.io)*\n`;
+
+    return markdown;
+  } catch (error) {
+    return `# Breaking Changes for Angular ${version}\n\nError reading documentation: ${error}`;
+  }
 }
 
 /**

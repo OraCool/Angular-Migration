@@ -46,7 +46,7 @@ export interface TroubleshootingInfo {
 }
 
 /**
- * Tool execution result
+ * Tool execution result (legacy format - kept for backward compatibility)
  */
 export interface ToolResult {
   success: boolean;
@@ -62,6 +62,57 @@ export interface ToolResult {
 
   /** Troubleshooting guidance */
   troubleshooting?: TroubleshootingInfo;
+}
+
+/**
+ * Standardized MCP Tool Response (from MCP_SERVER_AGENT_PROMPT.md spec)
+ * All new tools MUST return this format
+ */
+export interface StandardToolResponse {
+  /** Status of the operation */
+  status: "success" | "warning" | "error";
+
+  /** Tool-specific data */
+  data: unknown;
+
+  /** Clear instruction for next step */
+  nextAction: string;
+
+  /** MCP Resource URI reference or null */
+  instructionRef: string | null;
+
+  /** Command user must run manually or null */
+  userAction: string | null;
+
+  /** Whether this tool performs automated actions */
+  automated: boolean;
+}
+
+/**
+ * Standardized Error Response (from MCP_SERVER_AGENT_PROMPT.md spec)
+ */
+export interface StandardErrorResponse {
+  /** Always "error" */
+  status: "error";
+
+  /** Error details */
+  error: {
+    /** ERROR_CODE in UPPER_SNAKE_CASE */
+    code: string;
+    /** Human-readable error message */
+    message: string;
+    /** Technical details for debugging */
+    details: string;
+  };
+
+  /** How to resolve the error */
+  nextAction: string;
+
+  /** Whether rollback is available */
+  rollbackAvailable: boolean;
+
+  /** MCP Resource URI reference or null */
+  instructionRef: string | null;
 }
 
 /**
@@ -164,4 +215,97 @@ export interface StreamingToolResult extends ToolResult {
 
   /** Progress updates collected during execution */
   progressUpdates?: ProgressUpdate[];
+}
+
+/**
+ * Breaking change detection result
+ */
+export interface BreakingChangeDetection {
+  /** Unique ID for this breaking change */
+  id: string;
+
+  /** Category of breaking change */
+  category: 'Deprecated API' | 'Import Changes' | 'Configuration Changes' | 'Behavior Changes' | 'Removed Feature';
+
+  /** Severity level */
+  severity: 'critical' | 'high' | 'medium' | 'low';
+
+  /** Description of the breaking change */
+  description: string;
+
+  /** Files affected by this change */
+  affectedFiles: Array<{
+    path: string;
+    line: number;
+    snippet: string;
+  }>;
+
+  /** Whether auto-fix is available */
+  autoFixAvailable: boolean;
+
+  /** Whether schematic is available */
+  schematicAvailable: boolean;
+
+  /** URI to migration guide */
+  migrationGuide: string;
+}
+
+/**
+ * Package dependency info
+ */
+export interface PackageDependency {
+  /** Package name */
+  package: string;
+
+  /** Current version */
+  currentVersion: string;
+
+  /** Recommended/compatible version */
+  compatibleVersion?: string;
+
+  /** Whether update is required */
+  updateRequired: boolean;
+
+  /** Reason for incompatibility */
+  reason?: string;
+
+  /** Whether this is a breaking change */
+  breaking?: boolean;
+}
+
+/**
+ * Node.js version compatibility check
+ */
+export interface NodeVersionCheck {
+  /** Current Node.js version */
+  currentVersion: string;
+
+  /** Required Node.js version */
+  requiredVersion: string;
+
+  /** Whether version is compatible */
+  compatible: boolean;
+
+  /** Suggested action if incompatible */
+  suggestedAction?: string;
+}
+
+/**
+ * Project analysis result
+ */
+export interface ProjectAnalysis {
+  /** Current Angular version */
+  currentVersion: string;
+
+  /** Target Angular version */
+  targetVersion: string;
+
+  /** Migration path (array of versions) */
+  migrationPath: string[];
+
+  /** Node.js version info */
+  nodeVersion: NodeVersionCheck;
+
+  /** Project path */
+  projectPath: string;
 }
