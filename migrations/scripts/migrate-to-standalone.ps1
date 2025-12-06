@@ -157,9 +157,9 @@ try {
             "all" {
                 Write-InfoMessage "Step 1/3: Converting components, directives, and pipes to standalone..."
                 $convertCmd = if ($DryRun) {
-                    "ng generate @angular/core:standalone --dry-run"
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --interactive=false --dry-run"
                 } else {
-                    "ng generate @angular/core:standalone"
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --interactive=false"
                 }
 
                 $convertOutput = Invoke-Expression $convertCmd 2>&1
@@ -175,9 +175,9 @@ try {
                     Write-Host ""
                     Write-InfoMessage "Step 2/3: Removing unnecessary NgModules..."
                     $pruneCmd = if ($DryRun) {
-                        "ng generate @angular/core:standalone --mode=prune-ng-modules --dry-run"
+                        "ng generate @angular/core:standalone --mode=prune-ng-modules --interactive=false --dry-run"
                     } else {
-                        "ng generate @angular/core:standalone --mode=prune-ng-modules"
+                        "ng generate @angular/core:standalone --mode=prune-ng-modules --interactive=false"
                     }
 
                     $pruneOutput = Invoke-Expression $pruneCmd 2>&1
@@ -193,9 +193,9 @@ try {
                     Write-Host ""
                     Write-InfoMessage "Step 3/3: Converting bootstrap to standalone..."
                     $bootstrapCmd = if ($DryRun) {
-                        "ng generate @angular/core:standalone --mode=standalone-bootstrap --dry-run"
+                        "ng generate @angular/core:standalone --mode=standalone-bootstrap --interactive=false --dry-run"
                     } else {
-                        "ng generate @angular/core:standalone --mode=standalone-bootstrap"
+                        "ng generate @angular/core:standalone --mode=standalone-bootstrap --interactive=false"
                     }
 
                     $bootstrapOutput = Invoke-Expression $bootstrapCmd 2>&1
@@ -210,9 +210,9 @@ try {
             "feature" {
                 Write-InfoMessage "Migrating feature module: $ModuleName..."
                 $featureCmd = if ($DryRun) {
-                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ModuleName --dry-run"
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ModuleName --interactive=false --dry-run"
                 } else {
-                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ModuleName"
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ModuleName --interactive=false"
                 }
 
                 $featureOutput = Invoke-Expression $featureCmd 2>&1
@@ -227,9 +227,9 @@ try {
             "component" {
                 Write-InfoMessage "Migrating component: $ComponentPath..."
                 $componentCmd = if ($DryRun) {
-                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ComponentPath --dry-run"
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ComponentPath --interactive=false --dry-run"
                 } else {
-                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ComponentPath"
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ComponentPath --interactive=false"
                 }
 
                 $componentOutput = Invoke-Expression $componentCmd 2>&1
@@ -346,6 +346,88 @@ try {
                         # Extract all imports from the file's import statements and template
                         $importModules = @()
 
+                        # Component to package mapping for Angular Material and common components
+                        $componentPackageMap = @{
+                            # Angular Material
+                            'MatIcon' = '@angular/material/icon'
+                            'MatButton' = '@angular/material/button'
+                            'MatIconButton' = '@angular/material/button'
+                            'MatFabButton' = '@angular/material/button'
+                            'MatMiniFabButton' = '@angular/material/button'
+                            'MatToolbar' = '@angular/material/toolbar'
+                            'MatSidenav' = '@angular/material/sidenav'
+                            'MatSidenavContainer' = '@angular/material/sidenav'
+                            'MatSidenavContent' = '@angular/material/sidenav'
+                            'MatFormField' = '@angular/material/form-field'
+                            'MatLabel' = '@angular/material/form-field'
+                            'MatError' = '@angular/material/form-field'
+                            'MatHint' = '@angular/material/form-field'
+                            'MatPrefix' = '@angular/material/form-field'
+                            'MatSuffix' = '@angular/material/form-field'
+                            'MatInput' = '@angular/material/input'
+                            'MatSelect' = '@angular/material/select'
+                            'MatOption' = '@angular/material/core'
+                            'MatCard' = '@angular/material/card'
+                            'MatCardHeader' = '@angular/material/card'
+                            'MatCardTitle' = '@angular/material/card'
+                            'MatCardSubtitle' = '@angular/material/card'
+                            'MatCardContent' = '@angular/material/card'
+                            'MatCardActions' = '@angular/material/card'
+                            'MatMenu' = '@angular/material/menu'
+                            'MatMenuItem' = '@angular/material/menu'
+                            'MatMenuTrigger' = '@angular/material/menu'
+                            'MatList' = '@angular/material/list'
+                            'MatListItem' = '@angular/material/list'
+                            'MatNavList' = '@angular/material/list'
+                            'MatTable' = '@angular/material/table'
+                            'MatHeaderRow' = '@angular/material/table'
+                            'MatRow' = '@angular/material/table'
+                            'MatHeaderCell' = '@angular/material/table'
+                            'MatCell' = '@angular/material/table'
+                            'MatColumnDef' = '@angular/material/table'
+                            'MatHeaderRowDef' = '@angular/material/table'
+                            'MatRowDef' = '@angular/material/table'
+                            'MatCellDef' = '@angular/material/table'
+                            'MatHeaderCellDef' = '@angular/material/table'
+                            'MatDialog' = '@angular/material/dialog'
+                            'MatDialogTitle' = '@angular/material/dialog'
+                            'MatDialogContent' = '@angular/material/dialog'
+                            'MatDialogActions' = '@angular/material/dialog'
+                            'MatDialogClose' = '@angular/material/dialog'
+                            'MatTab' = '@angular/material/tabs'
+                            'MatTabGroup' = '@angular/material/tabs'
+                            'MatTabLabel' = '@angular/material/tabs'
+                            'MatCheckbox' = '@angular/material/checkbox'
+                            'MatRadioButton' = '@angular/material/radio'
+                            'MatRadioGroup' = '@angular/material/radio'
+                            'MatSlideToggle' = '@angular/material/slide-toggle'
+                            'MatProgressSpinner' = '@angular/material/progress-spinner'
+                            'MatProgressBar' = '@angular/material/progress-bar'
+                            'MatTooltip' = '@angular/material/tooltip'
+                            'MatBadge' = '@angular/material/badge'
+                            'MatChip' = '@angular/material/chips'
+                            'MatChipSet' = '@angular/material/chips'
+                            'MatPaginator' = '@angular/material/paginator'
+                            'MatDivider' = '@angular/material/divider'
+                            # Angular Common
+                            'NgIf' = '@angular/common'
+                            'NgFor' = '@angular/common'
+                            'NgSwitch' = '@angular/common'
+                            'NgSwitchCase' = '@angular/common'
+                            'NgSwitchDefault' = '@angular/common'
+                            'NgClass' = '@angular/common'
+                            'NgStyle' = '@angular/common'
+                            'AsyncPipe' = '@angular/common'
+                            'DatePipe' = '@angular/common'
+                            'DecimalPipe' = '@angular/common'
+                            'CurrencyPipe' = '@angular/common'
+                            'PercentPipe' = '@angular/common'
+                            # Angular Router
+                            'RouterOutlet' = '@angular/router'
+                            'RouterLink' = '@angular/router'
+                            'RouterLinkActive' = '@angular/router'
+                        }
+
                         # For components, also analyze the template
                         $templateContent = ""
                         if ($decoratorType -eq 'Component' -and $content -match "templateUrl\s*:\s*['\`"]([^'\`"]+)['\`"]") {
@@ -376,6 +458,9 @@ try {
                             }
                         }
 
+                        # Track components that need imports added
+                        $componentsToImport = @{}  # componentName -> package
+
                         # Analyze template for used components/directives if available
                         if ($templateContent) {
                             # Find all custom element tags in template
@@ -396,35 +481,76 @@ try {
                                     $componentName += 'Component'
                                 }
 
-                                # Check if this component is imported
+                                # Check if this component is already imported
                                 if ($importedClasses.ContainsKey($componentName)) {
                                     if ($importModules -notcontains $componentName) {
                                         $importModules += $componentName
                                     }
                                 }
+                                # If not imported but we know the package, mark it for import
+                                elseif ($componentPackageMap.ContainsKey($componentName)) {
+                                    if ($importModules -notcontains $componentName) {
+                                        $importModules += $componentName
+                                        $componentsToImport[$componentName] = $componentPackageMap[$componentName]
+                                    }
+                                }
                             }
 
                             # Also check for structural directives and pipes usage
-                            if ($templateContent -match '\*ngIf' -and $importedClasses.ContainsKey('NgIf')) {
-                                if ($importModules -notcontains 'NgIf') { $importModules += 'NgIf' }
+                            $directivesAndPipes = @(
+                                @{ Pattern = '\*ngIf'; Name = 'NgIf' },
+                                @{ Pattern = '\*ngFor'; Name = 'NgFor' },
+                                @{ Pattern = '\[ngSwitch\]|\*ngSwitchCase|\*ngSwitchDefault'; Name = 'NgSwitch' },
+                                @{ Pattern = '\[ngClass\]'; Name = 'NgClass' },
+                                @{ Pattern = '\[ngStyle\]'; Name = 'NgStyle' },
+                                @{ Pattern = '\|\s*async'; Name = 'AsyncPipe' },
+                                @{ Pattern = '\|\s*date'; Name = 'DatePipe' }
+                            )
+
+                            foreach ($item in $directivesAndPipes) {
+                                if ($templateContent -match $item.Pattern) {
+                                    if ($importedClasses.ContainsKey($item.Name)) {
+                                        if ($importModules -notcontains $item.Name) {
+                                            $importModules += $item.Name
+                                        }
+                                    }
+                                    elseif ($componentPackageMap.ContainsKey($item.Name)) {
+                                        if ($importModules -notcontains $item.Name) {
+                                            $importModules += $item.Name
+                                            $componentsToImport[$item.Name] = $componentPackageMap[$item.Name]
+                                        }
+                                    }
+                                }
                             }
-                            if ($templateContent -match '\*ngFor' -and $importedClasses.ContainsKey('NgFor')) {
-                                if ($importModules -notcontains 'NgFor') { $importModules += 'NgFor' }
+                        }
+
+                        # Add missing imports to the TypeScript file
+                        if ($componentsToImport.Count -gt 0) {
+                            # Group imports by package
+                            $packageImports = @{}
+                            foreach ($comp in $componentsToImport.Keys) {
+                                $package = $componentsToImport[$comp]
+                                if (-not $packageImports.ContainsKey($package)) {
+                                    $packageImports[$package] = @()
+                                }
+                                $packageImports[$package] += $comp
                             }
-                            if ($templateContent -match '\[ngSwitch\]|\*ngSwitchCase|\*ngSwitchDefault' -and $importedClasses.ContainsKey('NgSwitch')) {
-                                if ($importModules -notcontains 'NgSwitch') { $importModules += 'NgSwitch' }
+
+                            # Add import statements for each package
+                            $importsToAdd = ""
+                            foreach ($package in $packageImports.Keys) {
+                                $components = $packageImports[$package] -join ', '
+                                $importsToAdd += "import { $components } from '$package';`n"
                             }
-                            if ($templateContent -match '\[ngClass\]' -and $importedClasses.ContainsKey('NgClass')) {
-                                if ($importModules -notcontains 'NgClass') { $importModules += 'NgClass' }
+
+                            # Insert imports at the beginning of the file (after existing imports if any)
+                            if ($content -match '(?s)(import\s+\{[^}]+\}\s+from\s+[^;]+;[\s\n]*)+') {
+                                # Insert after last import
+                                $content = $content -replace '((?:import\s+\{[^}]+\}\s+from\s+[^;]+;[\s\n]*)+)', "`$1$importsToAdd"
                             }
-                            if ($templateContent -match '\[ngStyle\]' -and $importedClasses.ContainsKey('NgStyle')) {
-                                if ($importModules -notcontains 'NgStyle') { $importModules += 'NgStyle' }
-                            }
-                            if ($templateContent -match '\|\s*async' -and $importedClasses.ContainsKey('AsyncPipe')) {
-                                if ($importModules -notcontains 'AsyncPipe') { $importModules += 'AsyncPipe' }
-                            }
-                            if ($templateContent -match '\|\s*date' -and $importedClasses.ContainsKey('DatePipe')) {
-                                if ($importModules -notcontains 'DatePipe') { $importModules += 'DatePipe' }
+                            else {
+                                # No imports yet, add at the beginning
+                                $content = $importsToAdd + $content
                             }
                         }
 
