@@ -250,6 +250,234 @@ try {
             throw "Standalone migration failed"
         }
 
+        # ============================================================================
+        # POST-PROCESSING: Ensure all components are properly standalone
+        # ============================================================================
+        # The Angular CLI schematic sometimes fails to add standalone: true to
+        # component decorators. This step ensures all components are properly converted.
+
+        if ($TargetScope -eq "all") {
+            Write-Host ""
+            Write-InfoMessage "Step 4/4: Converting components to standalone with OnPush..."
+
+            $srcPath = Join-Path $ProjectPath "src"
+
+            # Find all component, directive, and pipe files
+            $angularFiles = Get-ChildItem -Path $srcPath -Recurse -File |
+                Where-Object {
+                    ($_.Name -match '\.(component|directive|pipe)\.ts$') -and
+                    ($_.FullName -notmatch 'node_modules') -and
+                    ($_.FullName -notmatch 'dist') -and
+                    ($_.FullName -notmatch '.angular') -and
+                    ($_.Name -notmatch '\.spec\.ts$')
+                }
+
+            $convertedCount = 0
+            $alreadyStandaloneCount = 0
+
+            foreach ($file in $angularFiles) {
+                $content = Get-Content -Path $file.FullName -Raw
+                $originalContent = $content
+
+                # Determine the decorator type
+                $decoratorType = $null
+                $decoratorPattern = $null
+
+                if ($content -match '@Component\s*\(\s*\{') {
+                    $decoratorType = 'Component'
+                    $decoratorPattern = '@Component'
+                } elseif ($content -match '@Directive\s*\(\s*\{') {
+                    $decoratorType = 'Directive'
+                    $decoratorPattern = '@Directive'
+                } elseif ($content -match '@Pipe\s*\(\s*\{') {
+                    $decoratorType = 'Pipe'
+                    $decoratorPattern = '@Pipe'
+                }
+
+                if (-not $decoratorType) {
+                    continue
+                }
+
+                # Check if already standalone
+                if ($content -match "$decoratorPattern\s*\(\s*\{[^}]*standalone\s*:\s*true") {
+                    $alreadyStandaloneCount++
+                    continue
+                }
+
+                # For components, ensure ChangeDetectionStrategy is imported
+                if ($decoratorType -eq 'Component') {
+                    if ($content -notmatch "import\s*\{[^}]*ChangeDetectionStrategy[^}]*\}\s*from\s*'@angular/core'") {
+                        # Add ChangeDetectionStrategy to existing @angular/core import or create new one
+                        if ($content -match "import\s*\{([^}]+)\}\s*from\s*'@angular/core'") {
+                            $existingImports = $matches[1]
+                            $newImports = "$existingImports, ChangeDetectionStrategy"
+                            $content = $content -replace "(import\s*\{)([^}]+)(\}\s*from\s*'@angular/core')", "`${1}$newImports`$3"
+                        } else {
+                            # No @angular/core import exists, add it
+                            $content = "import { ChangeDetectionStrategy } from '@angular/core';`n" + $content
+                        }
+                    }
+                }
+
+                # Extract the decorator content
+                if ($content -match "(?s)$decoratorPattern\s*\(\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}\s*\)") {
+                    $decoratorContent = $matches[1]
+
+                    # Build the properties to add
+                    $propertiesToAdd = "`n  standalone: true"
+                    if ($decoratorType -eq 'Component') {
+                        $propertiesToAdd += ",`n  changeDetection: ChangeDetectionStrategy.OnPush"
+                    }
+
+                    # Find the first property in the decorator
+                    if ($decoratorContent -match '^\s*([a-zA-Z]+\s*:)') {
+                        # Insert properties before the first property
+                        $newDecoratorContent = "$propertiesToAdd,`n  $decoratorContent"
+                    } else {
+                        # Decorator is empty or malformed, add properties
+                        $newDecoratorContent = "$propertiesToAdd`n$decoratorContent"
+                    }
+
+                    # Replace the decorator content
+                    $content = $content -replace "(?s)($decoratorPattern\s*\(\s*\{)[^}]+(?:\{[^}]*\}[^}]*)*(\}\s*\))",
+                        "`${1}$newDecoratorContent`$2"
+
+                        # Now we need to add imports array
+                        # Extract all imports from the file's import statements and template
+                        $importModules = @()
+
+                        # For components, also analyze the template
+                        $templateContent = ""
+                        if ($decoratorType -eq 'Component' -and $content -match "templateUrl\s*:\s*['\`"]([^'\`"]+)['\`"]") {
+                            $templatePath = $matches[1]
+                            $fullTemplatePath = Join-Path (Split-Path $file.FullName -Parent) $templatePath
+                            if (Test-Path $fullTemplatePath) {
+                                $templateContent = Get-Content -Path $fullTemplatePath -Raw
+                            }
+                        } elseif ($decoratorType -eq 'Component' -and $content -match "template\s*:\s*['\`"]") {
+                            # Inline template - extract it
+                            if ($content -match "template\s*:\s*['\`"]([^'\`"]*)['\`"]") {
+                                $templateContent = $matches[1]
+                            }
+                        }
+
+                        # Get all import statements from the file
+                        $importMatches = [regex]::Matches($content, "import\s*\{([^}]+)\}\s*from\s*'([^']+)'")
+
+                        # Build a map of imported classes
+                        $importedClasses = @{}
+                        foreach ($match in $importMatches) {
+                            $importedItems = $match.Groups[1].Value -split ',' | ForEach-Object { $_.Trim() }
+                            $fromModule = $match.Groups[2].Value
+
+                            foreach ($item in $importedItems) {
+                                $cleanItem = $item -replace '\s+as\s+.*', '' # Remove aliases
+                                $importedClasses[$cleanItem] = $fromModule
+                            }
+                        }
+
+                        # Analyze template for used components/directives if available
+                        if ($templateContent) {
+                            # Find all custom element tags in template
+                            $templateTags = [regex]::Matches($templateContent, '<(app-[\w-]+|mat-[\w-]+)[\s>]') |
+                                ForEach-Object { $_.Groups[1].Value } |
+                                Select-Object -Unique
+
+                            foreach ($tag in $templateTags) {
+                                # Convert kebab-case tag to PascalCase component name
+                                # app-header -> AppHeaderComponent, mat-sidenav -> MatSidenav
+                                $parts = $tag -split '-'
+                                $componentName = ($parts | ForEach-Object {
+                                    $_.Substring(0,1).ToUpper() + $_.Substring(1).ToLower()
+                                }) -join ''
+
+                                # For app-* components, add "Component" suffix if not present
+                                if ($tag -match '^app-' -and $componentName -notmatch 'Component$') {
+                                    $componentName += 'Component'
+                                }
+
+                                # Check if this component is imported
+                                if ($importedClasses.ContainsKey($componentName)) {
+                                    if ($importModules -notcontains $componentName) {
+                                        $importModules += $componentName
+                                    }
+                                }
+                            }
+
+                            # Also check for structural directives and pipes usage
+                            if ($templateContent -match '\*ngIf' -and $importedClasses.ContainsKey('NgIf')) {
+                                if ($importModules -notcontains 'NgIf') { $importModules += 'NgIf' }
+                            }
+                            if ($templateContent -match '\*ngFor' -and $importedClasses.ContainsKey('NgFor')) {
+                                if ($importModules -notcontains 'NgFor') { $importModules += 'NgFor' }
+                            }
+                            if ($templateContent -match '\[ngSwitch\]|\*ngSwitchCase|\*ngSwitchDefault' -and $importedClasses.ContainsKey('NgSwitch')) {
+                                if ($importModules -notcontains 'NgSwitch') { $importModules += 'NgSwitch' }
+                            }
+                            if ($templateContent -match '\[ngClass\]' -and $importedClasses.ContainsKey('NgClass')) {
+                                if ($importModules -notcontains 'NgClass') { $importModules += 'NgClass' }
+                            }
+                            if ($templateContent -match '\[ngStyle\]' -and $importedClasses.ContainsKey('NgStyle')) {
+                                if ($importModules -notcontains 'NgStyle') { $importModules += 'NgStyle' }
+                            }
+                            if ($templateContent -match '\|\s*async' -and $importedClasses.ContainsKey('AsyncPipe')) {
+                                if ($importModules -notcontains 'AsyncPipe') { $importModules += 'AsyncPipe' }
+                            }
+                            if ($templateContent -match '\|\s*date' -and $importedClasses.ContainsKey('DatePipe')) {
+                                if ($importModules -notcontains 'DatePipe') { $importModules += 'DatePipe' }
+                            }
+                        }
+
+                        # Also add modules that are commonly needed
+                        foreach ($className in $importedClasses.Keys) {
+                            $fromModule = $importedClasses[$className]
+
+                            # Angular forms modules
+                            if ($fromModule -eq '@angular/forms' -and $className -match '^(FormsModule|ReactiveFormsModule)$') {
+                                if ($importModules -notcontains $className) {
+                                    $importModules += $className
+                                }
+                            }
+                            # Router modules
+                            elseif ($fromModule -eq '@angular/router' -and $className -match '^(RouterOutlet|RouterLink|RouterLinkActive)$') {
+                                if ($importModules -notcontains $className) {
+                                    $importModules += $className
+                                }
+                            }
+                        }
+
+                    # Add imports array to the decorator if we found any modules
+                    if ($importModules.Count -gt 0) {
+                        $importsArray = "imports: [`n    " + ($importModules -join ",`n    ") + "`n  ],"
+
+                        # Insert imports array after the appropriate property
+                        if ($decoratorType -eq 'Component') {
+                            # Insert after changeDetection for components
+                            $content = $content -replace '(changeDetection\s*:\s*ChangeDetectionStrategy\.OnPush)\s*,', "`$1,`n  $importsArray"
+                        } else {
+                            # Insert after standalone for directives/pipes
+                            $content = $content -replace "(standalone\s*:\s*true)\s*,", "`$1,`n  $importsArray"
+                        }
+                    }
+                }
+
+                if ($content -ne $originalContent -and -not $DryRun) {
+                    Set-Content -Path $file.FullName -Value $content -NoNewline
+                    $convertedCount++
+                    Write-Success "  ✓ Converted: $($file.Name)"
+                }
+            }
+
+            Write-Host ""
+            if ($convertedCount -gt 0) {
+                Write-Success "✓ Converted $convertedCount component(s)/directive(s)/pipe(s) to standalone"
+                $changes += "Post-processed $convertedCount files (added standalone: true, OnPush for components, and imports)"
+            }
+            if ($alreadyStandaloneCount -gt 0) {
+                Write-InfoMessage "  ℹ  $alreadyStandaloneCount file(s) already standalone"
+            }
+        }
+
         # Run tests if not skipped
         if (-not $SkipTests -and -not $DryRun) {
             Write-Host ""
