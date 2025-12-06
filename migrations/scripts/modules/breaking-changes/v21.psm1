@@ -72,7 +72,7 @@ function Invoke-Angular21BreakingChanges {
         # SECTION 1: OFFICIAL ANGULAR 21 CORE BREAKING CHANGES
         # ========================================================================
 
-        Write-InfoMessage ""
+        Write-Host ""
         Write-InfoMessage "📋 Section 1: Official Angular 21 Core Breaking Changes"
         Write-InfoMessage "═══════════════════════════════════════════════════════"
 
@@ -295,7 +295,7 @@ function Invoke-Angular21BreakingChanges {
         # SECTION 2: THIRD-PARTY LIBRARY MIGRATIONS
         # ========================================================================
 
-        Write-InfoMessage ""
+        Write-Host ""
         Write-InfoMessage "📦 Section 2: Third-Party Library Migrations"
         Write-InfoMessage "═══════════════════════════════════════════════════════"
 
@@ -341,7 +341,7 @@ function Invoke-Angular21BreakingChanges {
         # SECTION 3: COMPREHENSIVE WARNINGS
         # ========================================================================
 
-        Write-InfoMessage ""
+        Write-Host ""
         Write-InfoMessage "⚠️  Section 3: Comprehensive Migration Warnings"
         Write-InfoMessage "═══════════════════════════════════════════════════════"
 

@@ -156,7 +156,7 @@ function Invoke-Angular17BreakingChanges {
 
                                     if ($continueResponse -eq 'n' -or $continueResponse -eq 'N') {
                                         Write-InfoMessage "Migration paused for MDC review."
-                                        Write-InfoMessage ""
+                                        Write-Host ""
                                         Write-InfoMessage "Next steps:"
                                         Write-InfoMessage "  1. Review changes: git diff"
                                         Write-InfoMessage "  2. Test Material components thoroughly"
@@ -226,7 +226,7 @@ function Invoke-Angular17BreakingChanges {
 
                             if ($forceResponse -ne 'y' -and $forceResponse -ne 'Y') {
                                 Write-InfoMessage "Migration cancelled."
-                                Write-InfoMessage ""
+                                Write-Host ""
                                 Write-InfoMessage "To migrate properly:"
                                 Write-InfoMessage "  1. Run: ng generate @angular/material:mdc-migration"
                                 Write-InfoMessage "  2. Review and test the changes"

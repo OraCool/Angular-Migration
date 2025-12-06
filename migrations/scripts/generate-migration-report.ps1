@@ -73,9 +73,9 @@ $allPassed = $buildResult.Success -and $testResult.Success -and $lintResult.Succ
 
 if ($allPassed) {
     Write-Success "✅ All validations passed!"
-    Write-InfoMessage ""
+    Write-Host ""
     Write-InfoMessage "Migration to Angular $currentVersion is complete and verified."
-    Write-InfoMessage ""
+    Write-Host ""
     Write-InfoMessage "Next steps:"
     Write-InfoMessage "  1. Review the full report: $reportPath"
     Write-InfoMessage "  2. Deploy to staging environment"
@@ -84,9 +84,9 @@ if ($allPassed) {
 }
 else {
     Write-WarningMessage "⚠️  Some validations failed"
-    Write-InfoMessage ""
+    Write-Host ""
     Write-InfoMessage "Review the report for details: $reportPath"
-    Write-InfoMessage ""
+    Write-Host ""
     Write-InfoMessage "Fix any issues before deploying to production."
 }
 
