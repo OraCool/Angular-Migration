@@ -21,14 +21,21 @@
 .PARAMETER AutoCommit
     Automatically commit changes after successful migration.
 
-.EXAMPLE
-    .\migrate-to-v18.ps1 -ProjectPath "C:\MyProject"
+.PARAMETER CommitSteps
+    Commit after each major migration step (package updates, breaking changes, schematics).
+    Recommended for production migrations to maintain clear audit trail.
 
 .EXAMPLE
-    .\migrate-to-v18.ps1 -ProjectPath "C:\MyProject" -AutoCommit -SkipTests
+    .\migrate-to-v17.ps1 -ProjectPath "C:\MyProject"
 
 .EXAMPLE
-    .\migrate-to-v18.ps1 -ProjectPath "C:\MyProject" -SkipInstall
+    .\migrate-to-v17.ps1 -ProjectPath "C:\MyProject" -AutoCommit -SkipTests
+
+.EXAMPLE
+    .\migrate-to-v17.ps1 -ProjectPath "C:\MyProject" -CommitSteps
+
+.EXAMPLE
+    .\migrate-to-v17.ps1 -ProjectPath "C:\MyProject" -SkipInstall
 
 .NOTES
     Part of Angular Migration Toolkit
@@ -58,7 +65,10 @@ param(
     [switch]$SkipLint = $false,
 
     [Parameter(Mandatory = $false)]
-    [switch]$AutoCommit = $false
+    [switch]$AutoCommit = $false,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$CommitSteps = $false
 )
 $ErrorActionPreference = 'Stop'
 
@@ -105,7 +115,8 @@ try {
         -SkipInstall:$SkipInstall `
         -SkipTests:$SkipTests `
         -SkipLint:$SkipLint `
-        -AutoCommit:$AutoCommit
+        -AutoCommit:$AutoCommit `
+        -CommitSteps:$CommitSteps
 
     if ($result.Success) {
         Write-Host ""
