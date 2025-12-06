@@ -47,67 +47,171 @@ Angular 20 is the final target version in this migration path. It represents the
 
 ### Breaking Changes
 
-#### 1. Highcharts v11 → v12 Upgrade
+The migration is organized into three categories based on automation level:
 
-Highcharts 12 has significant API changes:
+---
+
+**What Gets Automatically Fixed by v20.psm1:**
+
+#### 1. provideExperimentalZonelessChangeDetection Renamed ✅ **AUTO-FIXED**
+
+The migration script automatically renames the experimental API:
+
+**Before (Angular 19):**
+```typescript
+import { provideExperimentalZonelessChangeDetection } from '@angular/platform-browser';
+
+bootstrapApplication(AppComponent, {
+  providers: [provideExperimentalZonelessChangeDetection()]
+});
+```
+
+**After (Angular 20):**
+```typescript
+import { provideZonelessChangeDetection } from '@angular/platform-browser';
+
+bootstrapApplication(AppComponent, {
+  providers: [provideZonelessChangeDetection()] // Now Developer Preview
+});
+```
+
+#### 2. Highcharts v11 → v12 Import Syntax ✅ **AUTO-FIXED**
+
+The migration script automatically fixes Highcharts imports:
 
 **Before (Highcharts 11):**
 ```typescript
 import * as Highcharts from 'highcharts';
+import * as HighchartsMore from 'highcharts/highcharts-more';
 
 const options: Highcharts.Options = {
-  chart: {
-    type: 'line'
-  },
-  title: {
-    text: 'My Chart'
-  },
-  series: [{
-    type: 'line',
-    data: [1, 2, 3, 4, 5]
-  }]
+  chart: { type: 'line' },
+  series: [{ type: 'line', data: [1, 2, 3] }]
 };
 ```
 
 **After (Highcharts 12):**
 ```typescript
-import Highcharts from 'highcharts'; // Changed import
+import Highcharts from 'highcharts'; // ✅ Fixed
+import HighchartsMore from 'highcharts/highcharts-more'; // ✅ Fixed
 
 const options: Highcharts.Options = {
-  chart: {
-    type: 'line'
-  },
-  title: {
-    text: 'My Chart'
-  },
-  series: [{
-    type: 'line',
-    data: [1, 2, 3, 4, 5]
-  }]
+  chart: { type: 'line' },
+  series: [{ type: 'line', data: [1, 2, 3] }]
 };
 ```
 
-**Key Changes:**
-- Import syntax changed from `import * as Highcharts` to `import Highcharts`
-- Some deprecated options removed
-- Default styling changes
-- TypeScript definitions updated
+#### 3. Highcharts Module Imports ✅ **AUTO-FIXED**
 
-#### 2. Node.js 22 Support
+The migration script automatically fixes all Highcharts module imports:
 
-Angular 20 adds official support for Node.js 22:
+**Before:**
+```typescript
+import * as SolidGauge from 'highcharts/modules/solid-gauge';
+import * as Exporting from 'highcharts/modules/exporting';
+```
 
+**After:**
+```typescript
+import SolidGauge from 'highcharts/modules/solid-gauge'; // ✅ Fixed
+import Exporting from 'highcharts/modules/exporting'; // ✅ Fixed
+```
+
+---
+
+**What Gets Automatically Detected:**
+
+#### 4. InjectFlags Removed ⚠️ **CRITICAL - DETECTED**
+
+The migration script detects this removed API and provides interactive migration guidance:
+
+**Before (Angular 19):**
+```typescript
+import { InjectFlags } from '@angular/core';
+
+const service = injector.get(MyService, null, InjectFlags.Optional);
+```
+
+**After (Angular 20):**
+```typescript
+// Remove InjectFlags import
+const service = injector.get(MyService, { optional: true });
+```
+
+**Impact:** InjectFlags has been removed from `Injector.get`, `EnvironmentInjector.get`, `TestBed.get`, and `TestBed.inject`.
+
+**Action:** Replace InjectFlags parameters with options objects.
+
+#### 5. TestBed.get Removed ⚠️ **CRITICAL - DETECTED**
+
+The migration script detects usage in test files:
+
+**Before (Angular 19):**
+```typescript
+const service = TestBed.get(MyService);
+```
+
+**After (Angular 20):**
+```typescript
+const service = TestBed.inject(MyService); // ✅ Use inject instead
+```
+
+**Impact:** All test files using `TestBed.get()` must be updated.
+
+**Action:** Search for `TestBed.get(` and replace with `TestBed.inject(`.
+
+#### 6. provideZoneChangeDetection Error Handling Changed ℹ️ **INFO**
+
+**Impact:** TestBed now rethrows errors regardless of `provideZoneChangeDetection` usage.
+
+**Action:** Update tests to handle errors properly. Tests should prevent or account for errors.
+
+#### 7. ignoreChangesOutsideZone Removed ⚠️ **DETECTED**
+
+**Impact:** This option is no longer available for ZoneJS configuration.
+
+**Action:** Remove `ignoreChangesOutsideZone` from ZoneJS configuration.
+
+#### 8. ng-reflect-* Attributes Deprecated ℹ️ **INFO**
+
+**Impact:** Runtime no longer produces `ng-reflect-*` attributes by default.
+
+**Action:** Debug tools relying on these attributes may need updates.
+
+#### 9. Structural Directives Deprecated ℹ️ **INFO**
+
+**Impact:** `*ngIf`, `*ngFor`, `*ngSwitch` are officially deprecated.
+
+**Recommended:** Migrate to control flow syntax (`@if`, `@for`, `@switch`).
+
+**Migration:**
+```bash
+npx ng generate @angular/core:control-flow
+```
+
+#### 10. Node.js Version Requirements ⚠️ **DETECTED**
+
+**Impact:**
+- Node.js v18 is no longer supported
+- Node.js v22.0-22.10 are not supported
+
+**Required:** Node.js v20.11.1+ or v22.11.0+
+
+**package.json update:**
 ```json
-// package.json
 {
   "engines": {
-    "node": ">=20.11.0 || ^22.0.0",
+    "node": ">=20.11.1 || ^22.11.0",
     "npm": ">=10.0.0"
   }
 }
 ```
 
-#### 3. TypeScript 5.6 Improvements
+---
+
+**What Requires Manual Review (New Features):**
+
+#### 11. TypeScript 5.6 Improvements
 
 TypeScript 5.6 has stricter type checking:
 
@@ -121,6 +225,32 @@ interface Config {
 // Iterator helper methods (new in TS 5.6)
 const numbers = [1, 2, 3, 4, 5];
 const doubled = numbers.map(n => n * 2); // Better type inference
+```
+
+#### 12. Control Flow Migration (Optional)
+
+Consider migrating from structural directives to control flow syntax:
+
+```html
+<!-- Before: *ngIf -->
+<div *ngIf="user">{{ user.name }}</div>
+
+<!-- After: @if -->
+@if (user) {
+  <div>{{ user.name }}</div>
+}
+```
+
+#### 13. Zoneless Change Detection (Developer Preview)
+
+```typescript
+import { provideZonelessChangeDetection } from '@angular/platform-browser';
+
+bootstrapApplication(AppComponent, {
+  providers: [
+    provideZonelessChangeDetection() // Now Developer Preview (was Experimental)
+  ]
+});
 ```
 
 ---
@@ -206,62 +336,101 @@ npx ng update @angular/cli@20 --migrate-only --allow-dirty
 npx ng update @angular/material@20 --migrate-only --allow-dirty
 ```
 
-### Step 7: Fix Breaking Changes
+### Step 7: Apply Breaking Changes Fixes
+
+The migration script automatically applies breaking changes fixes:
 
 ```powershell
-# Automated fixes (includes Highcharts migration)
-..\migrations\scripts\fix-breaking-changes-v20.ps1
-
-# Or use module function
-Import-Module ..\migrations\scripts\modules\BreakingChanges.psm1
-Invoke-BreakingChangesFix -ProjectPath "." -Version "20"
+# This happens automatically during migrate-to-v20.ps1
+# Or run manually:
+Import-Module ..\migrations\scripts\modules\breaking-changes\v20.psm1
+Invoke-Angular20BreakingChanges -ProjectPath "."
 ```
 
-**Manual Highcharts Fixes:**
+**What This Step Does:**
 
-1. **Update Highcharts Imports:**
+**Section 1: Official Angular 20 Core Breaking Changes (8 detections + 1 auto-fix)**
+1. ⚠️ **InjectFlags usage** - CRITICAL detection with migration examples
+2. ⚠️ **TestBed.get usage** - CRITICAL detection in test files
+3. ℹ️ **provideZoneChangeDetection** - INFO about behavior change
+4. ✅ **provideExperimentalZonelessChangeDetection** - AUTO-FIX rename to provideZonelessChangeDetection
+5. ⚠️ **ignoreChangesOutsideZone** - Detection
+6. ℹ️ **ng-reflect-* attributes** - INFO about deprecation
+7. ℹ️ **Structural directives** - INFO about *ngIf, *ngFor, *ngSwitch deprecation
+8. ⚠️ **Node.js version** - Validate package.json requirements
 
-```bash
-# Find all Highcharts imports
-grep -r "import \* as Highcharts" src/
+**Section 2: Third-Party Breaking Changes (2 auto-fixes)**
+9. ✅ **Highcharts imports** - AUTO-FIX `import * as Highcharts` → `import Highcharts`
+10. ✅ **Highcharts modules** - AUTO-FIX module import syntax
+
+**Section 3: Comprehensive Warnings**
+- All 10 breaking changes with before/after examples
+- New features overview (zoneless, control flow)
+- Recommended actions
+- Documentation links
+
+**Expected Output:**
+```
+🔧 Applying Angular 20 breaking changes and migrations...
+
+📋 Section 1: Official Angular 20 Core Breaking Changes
+═══════════════════════════════════════════════════════
+📝 Checking for InjectFlags usage...
+  ✓ No InjectFlags usage found
+📝 Checking for TestBed.get() usage...
+  ✓ No TestBed.get() usage found
+📝 Checking for provideZoneChangeDetection usage...
+  ✓ No provideZoneChangeDetection usage found
+📝 Renaming provideExperimentalZonelessChangeDetection → provideZonelessChangeDetection...
+  ✓ No provideExperimentalZonelessChangeDetection usage found
+📝 Checking for ignoreChangesOutsideZone usage...
+  ✓ No ignoreChangesOutsideZone usage found
+📝 Checking for ng-reflect-* attributes...
+  ✓ No ng-reflect-* usage found in templates
+📝 Checking for deprecated structural directives (*ngIf, *ngFor, *ngSwitch)...
+  ℹ️  Found structural directives in 45 file(s)
+     *ngIf, *ngFor, *ngSwitch are now officially deprecated
+     Consider migrating to control flow syntax (@if, @for, @switch)
+📝 Checking Node.js version requirements...
+  ℹ️  package.json engines.node: >=20.11.1
+
+📋 Section 2: Third-Party Breaking Changes
+═══════════════════════════════════════════════
+📝 Fixing Highcharts v12 import syntax...
+  ✅ Fixed Highcharts import syntax in 3 file(s)
+📝 Fixing Highcharts module import syntax...
+  ✅ Fixed Highcharts module imports in 2 file(s)
+
+Angular 20 breaking changes processed successfully
+  Total automated fixes: 5
+  Total detections/warnings: 14
+
+⚠️  Important Warnings and Recommendations:
+  (Comprehensive warnings displayed here...)
 ```
 
-Replace with:
+**Manual Fixes Required:**
+
+If the script detects InjectFlags or TestBed.get usage, you'll need to manually update:
+
+**InjectFlags Fix:**
 ```typescript
-// Before
-import * as Highcharts from 'highcharts';
+// Find all InjectFlags usage
+grep -r "InjectFlags" src/
 
-// After
-import Highcharts from 'highcharts';
+// Replace with options object
+// Before: injector.get(MyService, null, InjectFlags.Optional)
+// After:  injector.get(MyService, { optional: true })
 ```
 
-2. **Update Highcharts Module Imports:**
-
+**TestBed.get Fix:**
 ```typescript
-// Before
-import * as HighchartsMore from 'highcharts/highcharts-more';
-import * as SolidGauge from 'highcharts/modules/solid-gauge';
+// Find all TestBed.get usage
+grep -r "TestBed.get" src/
 
-HighchartsMore(Highcharts);
-SolidGauge(Highcharts);
-
-// After
-import HighchartsMore from 'highcharts/highcharts-more';
-import SolidGauge from 'highcharts/modules/solid-gauge';
-
-HighchartsMore(Highcharts);
-SolidGauge(Highcharts);
-```
-
-3. **Check Chart Options:**
-
-```typescript
-// Some options deprecated in Highcharts 12
-// Review Highcharts 12 changelog for full list
-const options: Highcharts.Options = {
-  // Remove deprecated options
-  // Update changed option names
-};
+// Replace with TestBed.inject
+// Before: const service = TestBed.get(MyService);
+// After:  const service = TestBed.inject(MyService);
 ```
 
 ### Step 8: Build the Project
@@ -320,13 +489,18 @@ npm start
 
 **Critical Test Checklist:**
 - [ ] Application loads without errors
-- [ ] All Highcharts render correctly
+- [ ] All Highcharts render correctly (v12 imports fixed)
 - [ ] Chart interactions work (zoom, pan, tooltips)
+- [ ] Highcharts modules work (More, SolidGauge, Exporting)
 - [ ] AG Grid renders and functions properly
 - [ ] Forms work
 - [ ] Routing works
 - [ ] API calls work
 - [ ] Authentication works
+- [ ] Tests pass (TestBed.inject used, not TestBed.get)
+- [ ] No InjectFlags usage errors
+- [ ] Zoneless change detection works (if enabled)
+- [ ] Control flow syntax works (if migrated)
 - [ ] No console errors or warnings
 - [ ] Performance is good (check DevTools)
 
@@ -340,7 +514,12 @@ git commit -m "chore: migrate to Angular 20 - FINAL VERSION ✨
 - Updated TypeScript to 5.6.3
 - Updated Highcharts to v12.0.0
 - Updated ag-grid-angular to v32.0.0
-- Applied Highcharts import fixes
+- Fixed Highcharts v12 import syntax (import * as → import)
+- Fixed Highcharts module imports
+- Renamed provideExperimentalZonelessChangeDetection → provideZonelessChangeDetection
+- Updated Node.js requirements (v20.11.1+ or v22.11.0+)
+- Verified no InjectFlags or TestBed.get usage
+- Structural directives deprecated (*ngIf, *ngFor, *ngSwitch)
 - All tests passing
 - Migration complete!"
 git push
@@ -485,18 +664,25 @@ npm run build
 - [ ] TypeScript is 5.6.3
 - [ ] Highcharts is 12.x.x
 - [ ] ag-grid-angular is 32.x.x
+- [ ] Node.js is v20.11.1+ or v22.11.0+
 - [ ] Build completes successfully
 - [ ] Build is faster than Angular 14
 - [ ] Bundle size is smaller than Angular 14
 - [ ] All tests pass
 - [ ] Linter passes
 - [ ] Dev server starts
-- [ ] All charts render correctly (Highcharts)
-- [ ] All grids work (AG Grid)
+- [ ] All charts render correctly (Highcharts v12)
+- [ ] Highcharts imports use `import Highcharts` (not `import * as`)
+- [ ] All grids work (AG Grid v32)
 - [ ] Forms work
 - [ ] Routing works
 - [ ] Authentication works
 - [ ] API integration works
+- [ ] No InjectFlags errors
+- [ ] No TestBed.get usage (all use TestBed.inject)
+- [ ] provideZonelessChangeDetection renamed correctly
+- [ ] Zoneless change detection works (if enabled)
+- [ ] Control flow syntax works (if migrated)
 - [ ] No console errors
 - [ ] Performance is good
 - [ ] Changes committed to git
