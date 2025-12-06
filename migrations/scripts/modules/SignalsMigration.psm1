@@ -349,40 +349,62 @@ function Convert-PropertyToSignal {
         $content = Get-Content -Path $ComponentPath -Raw
         $originalContent = $content
 
-        # Find class properties (exclude @Input, @Output, static, readonly, methods, observables)
-        # Pattern: property: Type = value; or property = value;
-        $propertyPattern = '(?m)^(\s+)(?!@Input|@Output|static|readonly|private\s+readonly|public\s+readonly)(\w+)(?:\s*:\s*([^=]+?))?\s*=\s*(.+?);'
+        # Extract only the class body (between export class ... { and final })
+        # This prevents matching component decorator properties
+        if ($content -match '(?s)export\s+class\s+\w+.*?\{(.+)\}[\s\r\n]*$') {
+            $classBody = $matches[1]
+            $classStartIndex = $content.IndexOf($matches[0])
 
-        $matches = [regex]::Matches($content, $propertyPattern)
+            # Find class properties (exclude @Input, @Output, static, readonly, methods, observables, decorators)
+            # Pattern: property: Type = value; or property = value;
+            # Must NOT be inside @Component or other decorators
+            $propertyPattern = '(?m)^(\s+)(?!@Input|@Output|@ViewChild|@ViewChildren|@ContentChild|@ContentChildren|static|readonly|private\s+readonly|public\s+readonly|constructor|ngOnInit|ngOnDestroy|ngAfterViewInit|ngOnChanges)(\w+)(?:\s*:\s*([^=]+?))?\s*=\s*(.+?);'
 
-        foreach ($match in $matches) {
-            $indent = $match.Groups[1].Value
-            $propName = $match.Groups[2].Value
-            $propType = $match.Groups[3].Value.Trim()
-            $propValue = $match.Groups[4].Value.Trim()
+            $matches = [regex]::Matches($classBody, $propertyPattern)
 
-            # Skip if property name ends with $ (Observable convention)
-            if ($propName -match '\$$') {
-                continue
+            foreach ($match in $matches) {
+                $indent = $match.Groups[1].Value
+                $propName = $match.Groups[2].Value
+                $propType = $match.Groups[3].Value.Trim()
+                $propValue = $match.Groups[4].Value.Trim()
+
+                # Skip if property name ends with $ (Observable convention)
+                if ($propName -match '\$$') {
+                    continue
+                }
+
+                # Skip if already a signal
+                if ($propValue -match '^\s*signal\s*[\(<]') {
+                    continue
+                }
+
+                # Skip common non-signal properties
+                $skipProperties = @('selector', 'templateUrl', 'styleUrls', 'template', 'styles', 'changeDetection', 'encapsulation', 'standalone', 'imports', 'providers')
+                if ($skipProperties -contains $propName) {
+                    continue
+                }
+
+                # Skip EventEmitters (should use output() instead, but that's a different migration)
+                if ($propValue -match 'new\s+EventEmitter') {
+                    continue
+                }
+
+                # Convert to signal
+                $oldDeclaration = $match.Value
+                $newDeclaration = if ($propType) {
+                    "${indent}${propName} = signal<${propType}>(${propValue});"
+                }
+                else {
+                    "${indent}${propName} = signal(${propValue});"
+                }
+
+                $content = $content.Replace($oldDeclaration, $newDeclaration)
+                $convertedProperties += $propName
+                $changes += "Converted property '$propName' to signal"
             }
-
-            # Skip if already a signal
-            if ($propValue -match '^\s*signal\s*[\(<]') {
-                continue
-            }
-
-            # Convert to signal
-            $oldDeclaration = $match.Value
-            $newDeclaration = if ($propType) {
-                "${indent}${propName} = signal<${propType}>(${propValue});"
-            }
-            else {
-                "${indent}${propName} = signal(${propValue});"
-            }
-
-            $content = $content.Replace($oldDeclaration, $newDeclaration)
-            $convertedProperties += $propName
-            $changes += "Converted property '$propName' to signal"
+        }
+        else {
+            $warnings += "Could not extract class body - skipping component"
         }
 
         if ($convertedProperties.Count -gt 0) {
