@@ -38,36 +38,72 @@ Angular 18 stabilizes signals, introduces experimental zoneless change detection
 
 ### Breaking Changes
 
-#### 1. Signal-based APIs Now Stable
+**What Gets Automatically Fixed by v18.psm1:**
 
-Signals are now the recommended pattern for state management:
+#### 1. StateKey/TransferState Imports ✅ **AUTO-FIXED**
 
-**Before (Angular 17 - Experimental):**
+The migration script automatically fixes import statements:
+
+**Before (Angular 17):**
 ```typescript
-import { signal, computed } from '@angular/core';
-
-export class AppComponent {
-  // Signals were experimental
-  count = signal(0);
-}
+import { StateKey, TransferState, makeStateKey } from '@angular/platform-browser';
 ```
 
-**After (Angular 18 - Stable):**
+**After (Angular 18):**
 ```typescript
-import { signal, computed, effect } from '@angular/core';
-
-export class AppComponent {
-  // Signals are now stable and recommended
-  count = signal(0);
-  doubleCount = computed(() => this.count() * 2);
-
-  constructor() {
-    effect(() => console.log('Count:', this.count()));
-  }
-}
+import { StateKey, TransferState, makeStateKey } from '@angular/core';
 ```
 
-#### 2. Route Redirects Must Be Absolute
+---
+
+**What Gets Automatically Detected:**
+
+#### 2. HttpClientModule Deprecation ⚠️ **CRITICAL - DETECTED**
+
+The migration script detects deprecated module usage and provides migration guidance:
+
+**Before (Angular 17):**
+```typescript
+import { HttpClientModule } from '@angular/common/http';
+
+@NgModule({
+  imports: [HttpClientModule]
+})
+export class AppModule { }
+```
+
+**After (Angular 18):**
+```typescript
+import { provideHttpClient } from '@angular/common/http';
+
+bootstrapApplication(AppComponent, {
+  providers: [provideHttpClient()]
+});
+```
+
+**Angular schematics handle this automatically** - the migration script detects and warns.
+
+#### 3. ServerTransferStateModule Removal ⚠️ **DETECTED**
+
+The migration script detects if you're using the removed module:
+
+**Impact:** ServerTransferStateModule no longer exists. TransferState can be injected directly.
+
+**Action:** Remove `ServerTransferStateModule` from imports.
+
+#### 4. Removed Platform APIs ⚠️ **DETECTED**
+
+The migration script detects usage of removed APIs:
+- `isPlatformWorkerUi` - Removed (no replacement)
+- `isPlatformWorkerApp` - Removed (no replacement)
+- `platformDynamicServer` - Use `renderApplication` instead
+- `AnimationDriver.matchesElement` - Removed (internal API)
+
+---
+
+**What Requires Manual Review:**
+
+#### 5. Route Redirects Must Be Absolute
 
 **Before (Angular 17):**
 ```typescript
@@ -85,7 +121,9 @@ const routes: Routes = [
 ];
 ```
 
-#### 3. `@angular/platform-server` API Changes
+**Angular schematics handle this automatically** during `ng update`.
+
+#### 6. SSR API Changes
 
 For SSR applications, some APIs have changed:
 
@@ -110,7 +148,15 @@ const html = await renderApplication(AppComponent, {
 });
 ```
 
-#### 4. Hydration Enabled by Default
+#### 7. OnPush Root Views Change Detection
+
+OnPush views at the root now need `markForCheck()` for host bindings:
+
+**Impact:** Host bindings on root OnPush components may not update automatically.
+
+**Action:** Call `changeDetectorRef.markForCheck()` when updating host bindings.
+
+#### 8. Hydration Enabled by Default
 
 For SSR apps, hydration is now enabled by default:
 
@@ -122,6 +168,28 @@ bootstrapApplication(AppComponent, {
     provideClientHydration() // Now enabled by default in Angular 18
   ]
 });
+```
+
+---
+
+**New Features (Optional):**
+
+#### 9. Signals Stable and Production-Ready
+
+Signals are now the recommended pattern for state management:
+
+```typescript
+import { signal, computed, effect } from '@angular/core';
+
+export class AppComponent {
+  // Signals are now stable and recommended
+  count = signal(0);
+  doubleCount = computed(() => this.count() * 2);
+
+  constructor() {
+    effect(() => console.log('Count:', this.count()));
+  }
+}
 ```
 
 ---
@@ -207,7 +275,43 @@ npx ng update @angular/cli@18 --migrate-only --allow-dirty
 npx ng update @angular/material@18 --migrate-only --allow-dirty
 ```
 
-### Step 7: Build the Project
+### Step 7: Apply Breaking Changes Fixes
+
+The migration script automatically applies breaking changes fixes:
+
+```powershell
+# This happens automatically during migrate-to-v18.ps1
+# Or run manually:
+Import-Module ..\migrations\scripts\modules\breaking-changes\v18.psm1
+Invoke-Angular18BreakingChanges -ProjectPath "."
+```
+
+**What This Step Does:**
+
+**Automated Fixes Applied:**
+1. ✅ **StateKey/TransferState Imports** - Automatically moved from `@angular/platform-browser` to `@angular/core`
+
+**Detection & Warnings:**
+2. ⚠️ **HttpClientModule Deprecation** - Detects usage and shows CRITICAL migration warning
+3. ⚠️ **ServerTransferStateModule** - Detects removed module usage
+4. ⚠️ **Removed Platform APIs** - Detects `isPlatformWorkerUi`, `isPlatformWorkerApp`, `platformDynamicServer`, `matchesElement`
+5. ⚠️ **Comprehensive Warnings** - All 12 breaking changes documented with examples
+
+**Expected Output:**
+```
+🔧 Applying Angular 18 breaking change fixes...
+📝 Fixing StateKey/TransferState imports...
+  Fixed StateKey/TransferState imports in 2 file(s)
+📝 Checking for deprecated HttpClientModule usage...
+
+  ═══════════════════════════════════════════════════════════════════
+    CRITICAL: HttpClientModule Deprecated in Angular 18
+  ═══════════════════════════════════════════════════════════════════
+
+  (Shows migration guidance and affected files)
+```
+
+### Step 8: Build the Project
 
 ```powershell
 # Run build validation
@@ -220,7 +324,7 @@ Or manually:
 npm run build
 ```
 
-### Step 8: Run Tests
+### Step 9: Run Tests
 
 ```powershell
 # Run test validation
@@ -233,7 +337,7 @@ Or manually:
 npm test -- --watch=false
 ```
 
-### Step 9: Run Linter
+### Step 10: Run Linter
 
 ```powershell
 ..\migrations\scripts\validate-lint.ps1
@@ -245,7 +349,7 @@ Or manually:
 npm run lint -- --fix
 ```
 
-### Step 10: Manual Testing
+### Step 11: Manual Testing
 
 ```bash
 npm start
@@ -253,13 +357,14 @@ npm start
 
 **Test Checklist:**
 - [ ] Application loads
-- [ ] Routing works (verify redirects)
+- [ ] Routing works (verify redirects are absolute)
 - [ ] Forms work
 - [ ] Signals work correctly
+- [ ] HttpClient works (after provideHttpClient migration)
 - [ ] No console errors
-- [ ] SSR works (if applicable)
+- [ ] SSR/hydration works (if applicable)
 
-### Step 11: Commit Changes
+### Step 12: Commit Changes
 
 ```bash
 git add .
@@ -267,12 +372,14 @@ git commit -m "chore: migrate to Angular 18
 
 - Updated all @angular packages to 18.2.0
 - Updated TypeScript to 5.4.5
+- Fixed StateKey/TransferState imports
+- Migrated HttpClientModule to provideHttpClient
 - Applied route redirect fixes
 - All tests passing"
 git push
 ```
 
-### Step 12: Generate Migration Report
+### Step 13: Generate Migration Report
 
 ```powershell
 ..\migrations\scripts\generate-migration-report.ps1
