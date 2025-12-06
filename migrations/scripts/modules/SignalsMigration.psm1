@@ -699,6 +699,15 @@ function Convert-InputOutputToSignals {
             $content = Add-TypeScriptImport -Content $content -ImportSymbols $importsToAdd -FromModule '@angular/core'
         }
 
+        # Remove old decorator imports if they're no longer used
+        if ($convertedInputs.Count -gt 0 -and $content -notmatch '@Input\(') {
+            $content = Remove-TypeScriptImport -Content $content -ImportSymbol 'Input' -FromModule '@angular/core'
+        }
+
+        if ($convertedOutputs.Count -gt 0 -and $content -notmatch '@Output\(') {
+            $content = Remove-TypeScriptImport -Content $content -ImportSymbol 'Output' -FromModule '@angular/core'
+        }
+
         # Remove EventEmitter import if no longer used
         if (($convertedOutputs.Count -gt 0 -or $convertedModels.Count -gt 0) -and $content -notmatch 'EventEmitter') {
             $content = Remove-TypeScriptImport -Content $content -ImportSymbol 'EventEmitter' -FromModule '@angular/core'
