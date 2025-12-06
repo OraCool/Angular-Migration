@@ -474,6 +474,13 @@ function Invoke-AngularMigration {
             throw "Prerequisites check failed. Please resolve issues before continuing."
         }
 
+        # Step 1.5: Ensure .gitignore is configured to exclude backup files
+        Write-InfoMessage "`n[Step 1.5/8] Configuring .gitignore for migration..."
+        $gitignoreResult = Initialize-ProjectGitignore -ProjectPath $ProjectPath
+        if (-not $gitignoreResult) {
+            Write-WarningMessage "Warning: Could not update .gitignore. Backup files may be committed."
+        }
+
         # Step 2: Update package.json
         Write-InfoMessage "`n[Step 2/8] Updating package.json..."
         $updateResult = Update-PackageJson -ProjectPath $ProjectPath -TargetVersion $TargetVersion

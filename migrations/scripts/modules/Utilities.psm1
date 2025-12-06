@@ -662,6 +662,95 @@ function Get-ProjectSize {
 
 #endregion
 
+#region Migration Preparation Functions
+
+<#
+.SYNOPSIS
+    Ensures the project's .gitignore includes migration-related patterns.
+
+.PARAMETER ProjectPath
+    Path to the Angular project.
+
+.RETURNS
+    $true if .gitignore was updated or already contains patterns, $false on error.
+
+.EXAMPLE
+    Initialize-ProjectGitignore -ProjectPath "C:\MyProject"
+#>
+function Initialize-ProjectGitignore {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectPath
+    )
+
+    try {
+        $gitignorePath = Join-Path $ProjectPath ".gitignore"
+
+        # Patterns that should be in .gitignore
+        $requiredPatterns = @(
+            '*.backup',
+            'package.json.backup',
+            'angular.json.backup',
+            'tsconfig.json.backup'
+        )
+
+        # Create .gitignore if it doesn't exist
+        if (-not (Test-Path $gitignorePath)) {
+            Write-InfoMessage "Creating .gitignore file..."
+            New-Item -ItemType File -Path $gitignorePath -Force | Out-Null
+        }
+
+        # Read current .gitignore content
+        $content = Get-Content -Path $gitignorePath -Raw -ErrorAction SilentlyContinue
+        if (-not $content) {
+            $content = ""
+        }
+
+        # Check and add missing patterns
+        $patternsAdded = @()
+        $needsUpdate = $false
+
+        foreach ($pattern in $requiredPatterns) {
+            # Use regex to match the pattern (accounting for different whitespace)
+            $escapedPattern = [regex]::Escape($pattern)
+            if ($content -notmatch "^\s*$escapedPattern\s*$") {
+                $patternsAdded += $pattern
+                $needsUpdate = $true
+            }
+        }
+
+        if ($needsUpdate) {
+            # Add a section header if not already present
+            if ($content -notmatch "# Migration backup files") {
+                if (-not $content.EndsWith("`n")) {
+                    $content += "`n"
+                }
+                $content += "`n# Migration backup files (created by ng update)`n"
+
+                foreach ($pattern in $patternsAdded) {
+                    $content += "$pattern`n"
+                }
+
+                Set-Content -Path $gitignorePath -Value $content.TrimEnd() -NoNewline
+                Write-Success "Updated .gitignore with migration patterns: $($patternsAdded -join ', ')"
+            }
+        }
+        else {
+            Write-InfoMessage ".gitignore already contains migration backup patterns"
+        }
+
+        return $true
+    }
+    catch {
+        Write-WarningMessage "Failed to update .gitignore: $_"
+        return $false
+    }
+}
+
+#endregion
+
 #region Export Module Members
 
 Export-ModuleMember -Function @(
@@ -678,7 +767,8 @@ Export-ModuleMember -Function @(
     'Test-BackupIntegrity',
     'Test-GitStatus',
     'Invoke-GitCommit',
-    'Get-ProjectSize'
+    'Get-ProjectSize',
+    'Initialize-ProjectGitignore'
 )
 
 #endregion
