@@ -349,20 +349,21 @@ function Convert-PropertyToSignal {
         $content = Get-Content -Path $ComponentPath -Raw
         $originalContent = $content
 
-        # Extract only the class body (between export class ... { and final })
-        # This prevents matching component decorator properties
-        if ($content -match '(?s)export\s+class\s+\w+.*?\{(.+)\}[\s\r\n]*$') {
-            $classBody = $matches[1]
-            $classStartIndex = $content.IndexOf($matches[0])
+        # Find class properties at the ROOT level of the class body only
+        # This regex finds properties directly inside the class, not nested in methods/objects
+        $propertyPattern = '(?s)export\s+class\s+\w+[^{]*\{(.*?)\n\s*(constructor|ngOnInit|ngOnDestroy|ngAfterViewInit|ngOnChanges|private|public|protected|\})'
 
-            # Find class properties (exclude @Input, @Output, static, readonly, methods, observables, decorators)
+        if ($content -match $propertyPattern) {
+            $classPropertiesSection = $matches[1]
+
+            # Now find individual property declarations in the properties section
             # Pattern: property: Type = value; or property = value;
-            # Must NOT be inside @Component or other decorators
-            $propertyPattern = '(?m)^(\s+)(?!@Input|@Output|@ViewChild|@ViewChildren|@ContentChild|@ContentChildren|static|readonly|private\s+readonly|public\s+readonly|constructor|ngOnInit|ngOnDestroy|ngAfterViewInit|ngOnChanges)(\w+)(?:\s*:\s*([^=]+?))?\s*=\s*(.+?);'
+            # Must be at the start of a line (not inside object literals or returns)
+            $individualPropertyPattern = '(?m)^(\s{2,})(?!@Input|@Output|@ViewChild|@ViewChildren|@ContentChild|@ContentChildren|static|readonly|private\s+readonly|public\s+readonly)([a-zA-Z_]\w+)(?:\s*:\s*([^=]+?))?\s*=\s*([^;]+);'
 
-            $matches = [regex]::Matches($classBody, $propertyPattern)
+            $propertyMatches = [regex]::Matches($classPropertiesSection, $individualPropertyPattern)
 
-            foreach ($match in $matches) {
+            foreach ($match in $propertyMatches) {
                 $indent = $match.Groups[1].Value
                 $propName = $match.Groups[2].Value
                 $propType = $match.Groups[3].Value.Trim()
@@ -389,6 +390,11 @@ function Convert-PropertyToSignal {
                     continue
                 }
 
+                # Skip properties that are part of method/constructor parameters or complex types
+                if ($propValue -match '[\(\{]' -and $propValue -notmatch 'new\s+\w+\(') {
+                    continue
+                }
+
                 # Convert to signal
                 $oldDeclaration = $match.Value
                 $newDeclaration = if ($propType) {
@@ -398,13 +404,15 @@ function Convert-PropertyToSignal {
                     "${indent}${propName} = signal(${propValue});"
                 }
 
-                $content = $content.Replace($oldDeclaration, $newDeclaration)
+                # Use regex replace with exact match to avoid replacing similar patterns elsewhere
+                $escapedOld = [regex]::Escape($oldDeclaration)
+                $content = $content -replace $escapedOld, $newDeclaration
                 $convertedProperties += $propName
                 $changes += "Converted property '$propName' to signal"
             }
         }
         else {
-            $warnings += "Could not extract class body - skipping component"
+            $warnings += "Could not extract class properties section - skipping component"
         }
 
         if ($convertedProperties.Count -gt 0) {
