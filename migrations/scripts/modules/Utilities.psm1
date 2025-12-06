@@ -509,7 +509,9 @@ function Test-GitStatus {
 
     Push-Location $ProjectPath
     try {
-        $isGitRepo = Test-Path (Join-Path $ProjectPath ".git")
+        # Check if current directory is in a git repository (works for subdirectories too)
+        $gitCheck = git rev-parse --git-dir 2>&1
+        $isGitRepo = $LASTEXITCODE -eq 0
 
         if (-not $isGitRepo) {
             return @{
