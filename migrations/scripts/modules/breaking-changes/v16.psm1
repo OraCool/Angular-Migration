@@ -55,23 +55,49 @@ function Invoke-Angular16BreakingChanges {
         $sassFilesFixed = 0
 
         foreach ($file in $scssFiles) {
-            $content = Get-Content -Path $file -Raw
-            $originalContent = $content
+            try {
+                $content = Get-Content -Path $file -Raw
+                $originalContent = $content
 
-            # Replace @import with @use for Material theme files
-            $content = $content -replace "@import\s+['""]~?@angular/material/theming['""]", "@use '@angular/material' as mat"
-            $content = $content -replace "@import\s+['""]~?@angular/material/prebuilt-themes/[^'""]+['""]", "@use '@angular/material' as mat"
+                # Skip if already migrated to @use syntax
+                if ($content -match "@use\s+['""]@angular/material['""]" -and $content -notmatch "@import\s+['""]~?@angular/material") {
+                    continue
+                }
 
-            # Replace common theme function calls
-            $content = $content -replace "\bmat-palette\(", "mat.define-palette("
-            $content = $content -replace "\bmat-light-theme\(", "mat.define-light-theme("
-            $content = $content -replace "\bmat-dark-theme\(", "mat.define-dark-theme("
-            $content = $content -replace "\bmat-typography-config\(", "mat.define-typography-config("
+                # Skip if file has no Material imports
+                if ($content -notmatch "@import\s+['""]~?@angular/material") {
+                    continue
+                }
 
-            if ($content -ne $originalContent) {
-                Set-Content -Path $file -Value $content -NoNewline
-                $sassFilesFixed++
-                $changes += "Migrated Sass @import to @use in: $([System.IO.Path]::GetFileName($file))"
+                # Replace @import with @use for Material theme files
+                # Handles both single and double quotes, with optional ~ prefix
+                $content = $content -replace "@import\s+['""]~?@angular/material/theming['""];?", "@use '@angular/material' as mat;"
+                $content = $content -replace "@import\s+['""]~?@angular/material/prebuilt-themes/[^'""]+['""];?", "@use '@angular/material' as mat;"
+
+                # Replace common theme function calls (only if not already using mat. prefix)
+                $content = $content -replace "(?<!mat\.)\bmat-palette\(", "mat.define-palette("
+                $content = $content -replace "(?<!mat\.)\bmat-light-theme\(", "mat.define-light-theme("
+                $content = $content -replace "(?<!mat\.)\bmat-dark-theme\(", "mat.define-dark-theme("
+                $content = $content -replace "(?<!mat\.)\bmat-typography-config\(", "mat.define-typography-config("
+
+                # Validate migration was successful
+                if ($content -ne $originalContent) {
+                    # Verify @use syntax exists and @import is gone
+                    if ($content -match "@use\s+['""]@angular/material['""]" -and $content -notmatch "@import\s+['""]~?@angular/material") {
+                        Set-Content -Path $file -Value $content -NoNewline
+                        $sassFilesFixed++
+                        $changes += "Migrated Sass @import to @use in: $([System.IO.Path]::GetFileName($file))"
+                    }
+                    else {
+                        $fileName = [System.IO.Path]::GetFileName($file)
+                        $warnings += "Sass migration may need manual review in: $fileName"
+                    }
+                }
+            }
+            catch {
+                Write-Verbose "Error processing Sass file $file : $_"
+                $fileName = [System.IO.Path]::GetFileName($file)
+                $warnings += "Could not process Sass file: $fileName"
             }
         }
 
@@ -158,15 +184,57 @@ function Invoke-Angular16BreakingChanges {
         }
 
         # 4. Add warnings about breaking changes that require manual intervention
-        $warnings += "Angular 16 Breaking Changes - Manual Review Required:"
-        $warnings += "  - TypeScript 4.9+ is now required"
-        $warnings += "  - Zone.js 0.11.x and 0.12.x are no longer supported (use 0.13+)"
-        $warnings += "  - View Engine (ngcc) has been removed - ensure all dependencies are Ivy-compatible"
-        $warnings += "  - Deprecated: ripple property on MatButton, MatCheckbox, MatChip"
-        $warnings += "  - entryComponents deleted from @NgModule and @Component APIs"
-        $warnings += "  - XhrFactory export from @angular/common/http has been removed"
-        $warnings += "  - Material theme mixins now have stricter validation - review custom themes"
-        $warnings += "  - If using Sass @import for Material themes, migrate to @use (attempted above)"
+        $warnings += ""
+        $warnings += "═══════════════════════════════════════════════════════════════════"
+        $warnings += "Angular 16 Breaking Changes - Manual Review Required"
+        $warnings += "═══════════════════════════════════════════════════════════════════"
+        $warnings += ""
+        $warnings += "1. TypeScript & Dependencies:"
+        $warnings += "   - TypeScript 4.9+ is now required (4.8 no longer supported)"
+        $warnings += "   - Zone.js 0.11.x and 0.12.x are no longer supported (use 0.13+)"
+        $warnings += "   - Node.js v14 is no longer supported (use v16 or v18)"
+        $warnings += ""
+        $warnings += "2. View Engine Removal:"
+        $warnings += "   - View Engine (ngcc) has been removed"
+        $warnings += "   - Ensure all dependencies are Ivy-compatible"
+        $warnings += "   - Check package.json for any View Engine-only libraries"
+        $warnings += ""
+        $warnings += "3. API Removals:"
+        $warnings += "   - entryComponents deleted from @NgModule and @Component APIs"
+        $warnings += "   - XhrFactory export from @angular/common/http has been removed"
+        $warnings += "     * Use: import { XhrFactory } from '@angular/common' instead"
+        $warnings += "   - EventManager.addGlobalEventListener has been removed"
+        $warnings += "     * Use: addEventListener or Renderer2 instead"
+        $warnings += "   - ReflectiveInjector has been removed"
+        $warnings += "     * Use: Injector.create() as replacement"
+        $warnings += "   - BrowserTransferStateModule has been removed"
+        $warnings += "     * TransferState can be injected directly without module"
+        $warnings += ""
+        $warnings += "4. Testing Changes:"
+        $warnings += "   - MockPlatformLocation is now provided by default in tests"
+        $warnings += "   - Tests relying on BrowserPlatformLocation may need updates"
+        $warnings += "   - Check direct window.history access in tests and components"
+        $warnings += "   - Use Angular Location APIs instead of direct browser APIs"
+        $warnings += ""
+        $warnings += "5. Angular Material:"
+        $warnings += "   - Deprecated: ripple property on MatButton, MatCheckbox, MatChip"
+        $warnings += "   - Material theme mixins now have stricter validation"
+        $warnings += "   - Review custom themes for compatibility"
+        $warnings += "   - Sass @import → @use migration (attempted above, verify results)"
+        $warnings += ""
+        $warnings += "6. Type System Changes:"
+        $warnings += "   - QueryList.filter now supports type narrowing"
+        $warnings += "   - May require updates if using type guard functions"
+        $warnings += "   - Scroll event's routerEvent may be NavigationSkipped (not just NavigationEnd)"
+        $warnings += ""
+        $warnings += "7. Recommended Actions:"
+        $warnings += "   - Run build: npm run build"
+        $warnings += "   - Run tests: npm test"
+        $warnings += "   - Run lint: npm run lint"
+        $warnings += "   - Search for removed APIs: EventManager.addGlobalEventListener, ReflectiveInjector"
+        $warnings += "   - Review Material components using ripple property"
+        $warnings += "   - Test thoroughly in all supported browsers"
+        $warnings += "═══════════════════════════════════════════════════════════════════"
 
         Write-Success "Angular 16 breaking changes processed successfully"
         Write-InfoMessage "  Total changes: $($changes.Count)"
