@@ -295,61 +295,78 @@ This schematic will:
 - Remove deprecated `appearance="legacy"`
 - Update theme configurations
 
-### Step 7: Fix Breaking Changes
+### Step 7: Apply Breaking Changes Fixes
+
+The migration includes automated breaking changes detection and fixes via `v17.psm1`:
 
 ```powershell
-# Automated fixes
-..\migrations\scripts\fix-breaking-changes-v17.ps1
-
-# Or use module function
-Import-Module ..\migrations\scripts\modules\BreakingChanges.psm1
-Invoke-BreakingChangesFix -ProjectPath "." -Version "17"
+# Breaking changes are automatically applied during migration
+# Or run manually:
+Import-Module ..\migrations\scripts\modules\breaking-changes\v17.psm1
+Invoke-Angular17BreakingChanges -ProjectPath "."
 ```
 
-**Manual Fixes:**
+**What Gets Automatically Fixed:**
 
-1. **Check for Legacy Material Components:**
+1. ✅ **Zone.js Deep Imports** (Auto-fixed)
+   - Replaces `zone.js/bundles/zone-testing.js` → `zone.js/testing`
+   - Replaces `zone.js/dist/zone` → `zone.js`
+   - Updates `karma.conf.js`, `test.ts`, `polyfills.ts`
 
-```bash
-# Find legacy Material appearance
-grep -r 'appearance="legacy"' src/
+**What Gets Detected & Warned:**
 
-# Find legacy Material imports (if any remaining)
-grep -r '@angular/material/legacy' src/
-```
+2. ⚠️ **Material MDC Migration Check** (Critical Warning)
+   - Scans for Material dependency
+   - Counts legacy Material component usage
+   - Warns if MDC migration required
 
-2. **Update CSS Classes:**
+3. ⚠️ **Router API Removals Detection**
+   - Detects: `setupTestingRouter`, `malformedUriErrorHandler`
+   - Detects: `canceledNavigationResolution`, `titleStrategy`, etc.
+   - Provides migration guidance for each API
 
-```bash
-# Find Material CSS classes that need updating
-grep -r '\.mat-form-field-' src/**/*.scss
-grep -r '\.mat-button' src/**/*.scss
-```
+4. ⚠️ **NgSwitch Equality Change**
+   - Counts `*ngSwitchCase` usages
+   - Warns about `===` vs `==` behavior change
+   - Suggests type safety review
 
-Update to MDC equivalents:
-```scss
-// Before
-.mat-form-field-appearance-legacy .mat-form-field-wrapper {
-  padding-bottom: 1.34375em;
-}
+**Review Breaking Changes Output:**
 
-// After
-.mat-mdc-form-field .mdc-text-field {
-  padding-bottom: 1.34375em;
-}
-```
+After running migration, review the comprehensive warnings output which includes:
+- Dependency requirements (Node.js 18.13+, TypeScript 5.2+, Zone.js 0.14+)
+- Router API removal guidance
+- NgSwitch type safety recommendations
+- Optional migration suggestions (control flow, application builder)
 
-3. **Update polyfills.ts:**
+**Manual Fixes Required:**
 
-If you have a separate `polyfills.ts`, Angular 17 prefers inline polyfills:
+1. **Material MDC Migration** (If you use Material):
+   ```bash
+   # MUST run before upgrading if Material detected
+   ng generate @angular/material:mdc-migration
+   ```
 
-```typescript
-// Move zone.js import to main.ts or specify in angular.json
-// angular.json
-{
-  "polyfills": ["zone.js"]
-}
-```
+2. **Router API Migrations:**
+   ```typescript
+   // Example: Replace malformedUriErrorHandler
+   export class CustomUrlSerializer extends DefaultUrlSerializer {
+     override parse(url: string): UrlTree {
+       try {
+         return super.parse(url);
+       } catch (error) {
+         console.error('Malformed URI:', error);
+         return super.parse('/error');
+       }
+     }
+   }
+   ```
+
+3. **NgSwitch Type Safety:**
+   ```typescript
+   // Ensure types match
+   value: number = 0;  // number
+   <div *ngSwitchCase="0">  // number (not "0" string)
+   ```
 
 ### Step 8: (Optional) Migrate to Control Flow Syntax
 
@@ -742,16 +759,21 @@ Angular 17 brings major performance gains:
 **Quick Command Reference:**
 
 ```powershell
-# Complete migration
+# Complete automated migration
 ..\migrations\scripts\migrate-to-v17.ps1
 
-# Validate
-..\migrations\scripts\validate-build.ps1
-..\migrations\scripts\validate-tests.ps1
+# Or run individual steps:
 
-# Fix breaking changes
-..\migrations\scripts\fix-breaking-changes-v17.ps1
+# Apply breaking changes
+Import-Module ..\migrations\scripts\modules\breaking-changes\v17.psm1
+Invoke-Angular17BreakingChanges -ProjectPath "."
 
-# Generate report
-..\migrations\scripts\generate-migration-report.ps1
+# Validate build
+npm run build
+
+# Run tests
+npm test
+
+# Run lint
+npm run lint
 ```
