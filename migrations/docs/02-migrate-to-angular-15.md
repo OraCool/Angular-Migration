@@ -535,6 +535,96 @@ git push
 
 ---
 
+## 📊 Git Commit Strategies
+
+The migration script supports two commit strategies for better version control:
+
+### Strategy 1: Single Commit (Default)
+
+Creates **one commit** at the end with all changes:
+
+```powershell
+.\migrate-to-v15.ps1 -AutoCommit
+```
+
+**Git History:**
+```
+abc1234 chore: migrate to Angular 15
+```
+
+**Best for:**
+- Small projects
+- Quick migrations
+- When you want a clean, simple history
+
+### Strategy 2: Step-by-Step Commits (Recommended) ✅
+
+Creates **separate commits** after each major transformation step:
+
+```powershell
+.\migrate-to-v15.ps1 -CommitSteps
+```
+
+**Git History:**
+```
+def5678 chore(migration): run ng update @angular/material@15 schematics
+ghi9012 chore(migration): run ng update @angular/core@15 and @angular/cli@15 schematics
+jkl3456 chore(migration): apply Angular 15 breaking changes fixes
+mno7890 chore(migration): update packages to Angular 15
+```
+
+**Benefits:**
+- ✅ **Better Traceability** - See exactly what each tool changed
+- ✅ **Granular Rollback** - Revert specific steps if needed
+- ✅ **Clear Audit Trail** - Know when and what changed
+- ✅ **Easier Debugging** - Identify which step caused issues
+- ✅ **Industry Best Practice** - Atomic commits
+
+**Commit Points:**
+1. After package.json update
+2. After breaking changes fixes (v15.psm1)
+3. After Angular Core/CLI schematics (`ng update @angular/core`, `ng update @angular/cli`)
+4. After Material schematics (`ng update @angular/material`)
+
+**Example workflow:**
+```powershell
+# Run migration with step commits
+.\migrate-to-v15.ps1 -CommitSteps
+
+# If something breaks, rollback specific step
+git log --oneline  # See all commits
+git revert <commit-hash>  # Rollback specific schematic changes
+
+# Or view changes from a specific step
+git show <commit-hash>
+```
+
+### When to Use Each Strategy
+
+| Scenario | Recommended Strategy |
+|----------|---------------------|
+| Production migration | `-CommitSteps` ✅ |
+| Team collaboration | `-CommitSteps` ✅ |
+| Compliance/audit requirements | `-CommitSteps` ✅ |
+| Large codebase | `-CommitSteps` ✅ |
+| Quick prototype migration | `-AutoCommit` |
+| Personal project | Either |
+
+**Note:** You can also commit manually after each step without using flags:
+```powershell
+# Run without auto-commit
+.\migrate-to-v15.ps1
+
+# Review changes
+git diff
+
+# Commit manually
+git add .
+git commit -m "chore: migrate to Angular 15"
+```
+
+---
+
 ## ⚠️ Common Issues
 
 ### Issue 1: TypeScript Compilation Errors

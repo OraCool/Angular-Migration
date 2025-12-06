@@ -364,6 +364,11 @@ function Invoke-MaterialUpdate {
 .PARAMETER AutoCommit
     Automatically commit changes after successful migration.
 
+.PARAMETER CommitSteps
+    Commit after each major migration step for better traceability.
+    Creates separate commits for: package updates, breaking changes, core schematics, and material schematics.
+    Recommended for production migrations to maintain clear audit trail.
+
 .RETURNS
     Hashtable with migration results.
 
@@ -406,14 +411,57 @@ function Invoke-AngularMigration {
         [switch]$SkipLint = $false,
 
         [Parameter(Mandatory = $false)]
-        [switch]$AutoCommit = $false
+        [switch]$AutoCommit = $false,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$CommitSteps = $false
     )
 
     $startTime = Get-Date
     $results = @{}
+    $commits = @()
+
+    # Helper function to commit changes at each step
+    function Invoke-StepCommit {
+        param(
+            [string]$StepName,
+            [string]$Description
+        )
+
+        if ($CommitSteps) {
+            Write-InfoMessage "  Committing changes: $Description"
+            $commitMessage = "chore(migration): $Description"
+            try {
+                $commitResult = Invoke-GitCommit -ProjectPath $ProjectPath -Message $commitMessage -AddAll
+                if ($commitResult) {
+                    $commits += @{
+                        Step = $StepName
+                        Message = $commitMessage
+                        Success = $true
+                    }
+                    Write-Success "  ✓ Committed: $Description"
+                }
+                else {
+                    Write-WarningMessage "  ⚠ Commit skipped (no changes or not a git repo)"
+                }
+            }
+            catch {
+                Write-WarningMessage "  ⚠ Commit failed: $_"
+                $commits += @{
+                    Step = $StepName
+                    Message = $commitMessage
+                    Success = $false
+                    Error = $_.Exception.Message
+                }
+            }
+        }
+    }
 
     Write-InfoMessage "═══════════════════════════════════════════════════════"
     Write-InfoMessage "  Angular Migration to Version $TargetVersion"
+    if ($CommitSteps) {
+        Write-InfoMessage "  Mode: Step-by-step commits (audit trail enabled)"
+    }
     Write-InfoMessage "═══════════════════════════════════════════════════════"
 
     try {
@@ -434,6 +482,8 @@ function Invoke-AngularMigration {
         if (-not $updateResult.Success) {
             throw "Failed to update package.json"
         }
+
+        Invoke-StepCommit -StepName "PackageUpdate" -Description "update packages to Angular $TargetVersion"
 
         # Step 3a: Clean package files (optional)
         if (-not $SkipClean) {
@@ -478,15 +528,21 @@ function Invoke-AngularMigration {
         $fixResult = Invoke-BreakingChangesFix -ProjectPath $ProjectPath -Version $TargetVersion
         $results['BreakingChanges'] = $fixResult
 
+        Invoke-StepCommit -StepName "BreakingChanges" -Description "apply Angular $TargetVersion breaking changes fixes"
+
         # Step 5: Run Angular schematics
         Write-InfoMessage "`n[Step 5/8] Running Angular schematics..."
         $schematicResult = Invoke-NgUpdate -ProjectPath $ProjectPath -TargetVersion $TargetVersion
         $results['Schematics'] = $schematicResult
 
+        Invoke-StepCommit -StepName "CoreSchematics" -Description "run ng update @angular/core@$TargetVersion and @angular/cli@$TargetVersion schematics"
+
         # Step 6: Run Material schematics
         Write-InfoMessage "`n[Step 6/8] Running Material schematics..."
         $materialResult = Invoke-MaterialUpdate -ProjectPath $ProjectPath -TargetVersion $TargetVersion
         $results['Material'] = $materialResult
+
+        Invoke-StepCommit -StepName "MaterialSchematics" -Description "run ng update @angular/material@$TargetVersion schematics"
 
         # Step 7: Validate build
         Write-InfoMessage "`n[Step 7/8] Validating build..."
@@ -508,12 +564,24 @@ function Invoke-AngularMigration {
             }
         }
 
-        # Auto-commit if requested
-        if ($AutoCommit) {
-            Write-InfoMessage "`nCommitting changes..."
-            $commitMessage = "chore: migrate to Angular $TargetVersion"
+        # Auto-commit if requested (and not using step commits)
+        if ($AutoCommit -and -not $CommitSteps) {
+            Write-InfoMessage "`nCommitting all changes..."
+            $commitMessage = "chore: migrate to Angular $TargetVersion`n`nMigration completed successfully with all automated fixes applied."
             $commitResult = Invoke-GitCommit -ProjectPath $ProjectPath -Message $commitMessage -AddAll
             $results['Commit'] = @{ Success = $commitResult }
+        }
+        elseif ($CommitSteps -and $commits.Count -gt 0) {
+            Write-InfoMessage "`nMigration commits created: $($commits.Count)"
+            foreach ($commit in $commits) {
+                if ($commit.Success) {
+                    Write-InfoMessage "  ✓ $($commit.Message)"
+                }
+                else {
+                    Write-WarningMessage "  ⚠ $($commit.Message) (failed)"
+                }
+            }
+            $results['Commits'] = $commits
         }
 
         # Clean up backup file after successful migration
@@ -533,6 +601,9 @@ function Invoke-AngularMigration {
         Write-InfoMessage "`n═══════════════════════════════════════════════════════"
         Write-Success "Migration to Angular $TargetVersion completed!"
         Write-InfoMessage "Total duration: $($duration.ToString('mm\:ss'))"
+        if ($CommitSteps -and $commits.Count -gt 0) {
+            Write-InfoMessage "Git commits: $($commits.Count) step(s) committed"
+        }
         Write-InfoMessage "═══════════════════════════════════════════════════════"
 
         return @{
@@ -540,6 +611,7 @@ function Invoke-AngularMigration {
             Message  = "Migration to Angular $TargetVersion completed successfully"
             Results  = $results
             Duration = $duration
+            Commits  = if ($CommitSteps) { $commits } else { @() }
         }
     }
     catch {
