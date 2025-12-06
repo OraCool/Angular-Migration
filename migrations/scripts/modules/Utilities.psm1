@@ -591,6 +591,11 @@ function Invoke-GitCommit {
         if ($AddAll) {
             Write-InfoMessage "Staging all changes..."
             git add -A
+
+            # Explicitly unstage backup files as a safety measure
+            # (even though .gitignore should handle this)
+            git reset *.backup 2>$null
+            git reset **/*.backup 2>$null
         }
 
         Write-InfoMessage "Creating commit: $Message"

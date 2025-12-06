@@ -41,6 +41,7 @@ Desktop.ini
 *-backup-*/
 angular-backup-*/
 backup-info.json
+*.backup
 
 # Migration reports (keep in version control but ignore local copies)
 # MIGRATION_REPORT.md
