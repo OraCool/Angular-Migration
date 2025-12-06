@@ -143,54 +143,175 @@ try {
     Write-InfoMessage "═══════════════════════════════════════════════════════"
     Write-InfoMessage "  Standalone Components Migration"
     Write-InfoMessage "═══════════════════════════════════════════════════════"
+    Write-Host ""
 
-    # TODO: Implement migration logic based on TargetScope
-    switch ($TargetScope) {
-        "all" {
-            Write-InfoMessage "`nMigrating entire application to standalone..."
-            Write-WarningMessage "Full application migration - Implementation pending"
-            Write-InfoMessage "This will:"
-            Write-InfoMessage "  1. Convert all components to standalone"
-            Write-InfoMessage "  2. Update all imports and dependencies"
-            Write-InfoMessage "  3. Convert routing to standalone"
-            Write-InfoMessage "  4. Update bootstrap configuration"
-            Write-InfoMessage "  5. Remove unnecessary NgModules"
+    # Save current directory and change to project directory
+    $originalLocation = Get-Location
+    Set-Location $ProjectPath
+
+    $migrationSuccess = $true
+    $changes = @()
+
+    try {
+        switch ($TargetScope) {
+            "all" {
+                Write-InfoMessage "Step 1/3: Converting components, directives, and pipes to standalone..."
+                $convertCmd = if ($DryRun) {
+                    "ng generate @angular/core:standalone --dry-run"
+                } else {
+                    "ng generate @angular/core:standalone"
+                }
+
+                $convertOutput = Invoke-Expression $convertCmd 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-ErrorMessage "Failed to convert to standalone: $convertOutput"
+                    $migrationSuccess = $false
+                } else {
+                    Write-Success "✓ Converted components to standalone"
+                    $changes += "Converted components, directives, and pipes to standalone"
+                }
+
+                if ($migrationSuccess) {
+                    Write-Host ""
+                    Write-InfoMessage "Step 2/3: Removing unnecessary NgModules..."
+                    $pruneCmd = if ($DryRun) {
+                        "ng generate @angular/core:standalone --mode=prune-ng-modules --dry-run"
+                    } else {
+                        "ng generate @angular/core:standalone --mode=prune-ng-modules"
+                    }
+
+                    $pruneOutput = Invoke-Expression $pruneCmd 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-WarningMessage "Failed to prune NgModules (this may be expected): $pruneOutput"
+                    } else {
+                        Write-Success "✓ Removed unnecessary NgModules"
+                        $changes += "Pruned unnecessary NgModules"
+                    }
+                }
+
+                if ($migrationSuccess) {
+                    Write-Host ""
+                    Write-InfoMessage "Step 3/3: Converting bootstrap to standalone..."
+                    $bootstrapCmd = if ($DryRun) {
+                        "ng generate @angular/core:standalone --mode=standalone-bootstrap --dry-run"
+                    } else {
+                        "ng generate @angular/core:standalone --mode=standalone-bootstrap"
+                    }
+
+                    $bootstrapOutput = Invoke-Expression $bootstrapCmd 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-WarningMessage "Failed to convert bootstrap (this may be expected): $bootstrapOutput"
+                    } else {
+                        Write-Success "✓ Converted to standalone bootstrap"
+                        $changes += "Converted bootstrap to standalone"
+                    }
+                }
+            }
+            "feature" {
+                Write-InfoMessage "Migrating feature module: $ModuleName..."
+                $featureCmd = if ($DryRun) {
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ModuleName --dry-run"
+                } else {
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ModuleName"
+                }
+
+                $featureOutput = Invoke-Expression $featureCmd 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-ErrorMessage "Failed to migrate feature module: $featureOutput"
+                    $migrationSuccess = $false
+                } else {
+                    Write-Success "✓ Migrated feature module: $ModuleName"
+                    $changes += "Migrated feature module: $ModuleName"
+                }
+            }
+            "component" {
+                Write-InfoMessage "Migrating component: $ComponentPath..."
+                $componentCmd = if ($DryRun) {
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ComponentPath --dry-run"
+                } else {
+                    "ng generate @angular/core:standalone --mode=convert-to-standalone --path=$ComponentPath"
+                }
+
+                $componentOutput = Invoke-Expression $componentCmd 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-ErrorMessage "Failed to migrate component: $componentOutput"
+                    $migrationSuccess = $false
+                } else {
+                    Write-Success "✓ Migrated component: $ComponentPath"
+                    $changes += "Migrated component: $ComponentPath"
+                }
+            }
         }
-        "feature" {
-            Write-InfoMessage "`nMigrating feature module: $ModuleName..."
-            Write-WarningMessage "Feature module migration - Implementation pending"
-            Write-InfoMessage "This will:"
-            Write-InfoMessage "  1. Convert all components in $ModuleName to standalone"
-            Write-InfoMessage "  2. Update module imports"
-            Write-InfoMessage "  3. Update routing if applicable"
+
+        # Restore original directory
+        Set-Location $originalLocation
+
+        if (-not $migrationSuccess) {
+            throw "Standalone migration failed"
         }
-        "component" {
-            Write-InfoMessage "`nMigrating component: $ComponentPath..."
-            Write-WarningMessage "Single component migration - Implementation pending"
-            Write-InfoMessage "This will:"
-            Write-InfoMessage "  1. Add standalone: true to component decorator"
-            Write-InfoMessage "  2. Move required imports to component"
-            Write-InfoMessage "  3. Remove component from NgModule declarations"
+
+        # Run tests if not skipped
+        if (-not $SkipTests -and -not $DryRun) {
+            Write-Host ""
+            Write-InfoMessage "Running tests..."
+            Set-Location $ProjectPath
+
+            $testOutput = & npm test 2>&1
+            Set-Location $originalLocation
+
+            if ($LASTEXITCODE -ne 0) {
+                Write-WarningMessage "Tests failed. Please review and fix."
+            } else {
+                Write-Success "✓ Tests passed"
+            }
         }
+
+        # Auto commit if requested
+        if ($AutoCommit -and -not $DryRun) {
+            Write-Host ""
+            Write-InfoMessage "Committing changes..."
+            Set-Location $ProjectPath
+
+            & git add . 2>&1 | Out-Null
+            & git commit -m "chore: migrate to standalone components" 2>&1 | Out-Null
+
+            Set-Location $originalLocation
+
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "✓ Changes committed"
+            }
+        }
+
+        $duration = (Get-Date) - $startTime
+
+        Write-Host ""
+        Write-InfoMessage "═══════════════════════════════════════════════════════"
+        Write-Success "Standalone migration completed successfully!"
+        Write-InfoMessage "Duration: $($duration.ToString('mm\:ss'))"
+        Write-InfoMessage "═══════════════════════════════════════════════════════"
+        Write-Host ""
+
+        if ($changes.Count -gt 0) {
+            Write-InfoMessage "Changes applied:"
+            foreach ($change in $changes) {
+                Write-InfoMessage "  ✓ $change"
+            }
+            Write-Host ""
+        }
+
+        Write-InfoMessage "Next steps:"
+        Write-InfoMessage "  1. Review the changes: git diff"
+        Write-InfoMessage "  2. Test your application thoroughly"
+        Write-InfoMessage "  3. Update any custom code that references NgModules"
+        Write-Host ""
+
+        exit 0
     }
-
-    $duration = (Get-Date) - $startTime
-
-    Write-Host ""
-    Write-InfoMessage "═══════════════════════════════════════════════════════"
-    Write-WarningMessage "Migration script created but implementation is pending"
-    Write-InfoMessage "Duration: $($duration.ToString('mm\:ss'))"
-    Write-InfoMessage "═══════════════════════════════════════════════════════"
-    Write-Host ""
-
-    Write-InfoMessage "Next steps:"
-    Write-InfoMessage "  1. Use Angular CLI schematics: ng generate @angular/core:standalone"
-    Write-InfoMessage "  2. Manually convert components using this guide:"
-    Write-InfoMessage "     https://angular.io/guide/standalone-migration"
-    Write-InfoMessage "  3. Review and test each migration step"
-    Write-Host ""
-
-    exit 0
+    catch {
+        # Restore original directory in case of error
+        Set-Location $originalLocation
+        throw
+    }
 }
 catch {
     $duration = (Get-Date) - $startTime

@@ -78,10 +78,44 @@ function Test-SignalsMigrationPrerequisites {
 
     try {
         $packageJson = Get-Content -Path $packageJsonPath -Raw | ConvertFrom-Json
-        $angularVersion = $packageJson.dependencies.'@angular/core' -replace '[^0-9.].*', ''
-        $majorVersion = [int]($angularVersion -split '\.')[0]
 
-        Write-InfoMessage "  Angular version: $angularVersion"
+        # Try to get Angular version from dependencies or devDependencies
+        $angularCoreVersion = $packageJson.dependencies.'@angular/core'
+        if (-not $angularCoreVersion) {
+            $angularCoreVersion = $packageJson.devDependencies.'@angular/core'
+        }
+
+        if (-not $angularCoreVersion) {
+            $errors += "@angular/core not found in package.json dependencies"
+            return @{
+                Success                 = $false
+                AngularVersion          = $null
+                NonStandaloneComponents = @()
+                NonOnPushComponents     = @()
+                Errors                  = $errors
+                Warnings                = $warnings
+            }
+        }
+
+        # Remove version prefixes (^, ~, >=, etc.) and extract version number
+        $angularVersion = $angularCoreVersion -replace '^[\^~>=<]+', '' -replace '\s.*$', ''
+
+        if ([string]::IsNullOrWhiteSpace($angularVersion)) {
+            $errors += "Could not parse Angular version from: $angularCoreVersion"
+            return @{
+                Success                 = $false
+                AngularVersion          = $null
+                NonStandaloneComponents = @()
+                NonOnPushComponents     = @()
+                Errors                  = $errors
+                Warnings                = $warnings
+            }
+        }
+
+        $versionParts = $angularVersion -split '\.'
+        $majorVersion = [int]$versionParts[0]
+
+        Write-InfoMessage "  Angular version: $angularVersion (major: $majorVersion)"
 
         if ($majorVersion -lt 16) {
             $errors += "Angular version must be >= 16 for signals support (found: $angularVersion)"
@@ -133,7 +167,9 @@ function Test-SignalsMigrationPrerequisites {
         }
     }
     catch {
-        $errors += $_.Exception.Message
+        $errorMsg = "Error reading package.json: $($_.Exception.Message)"
+        Write-ErrorMessage $errorMsg
+        $errors += $errorMsg
         return @{
             Success                 = $false
             AngularVersion          = $null

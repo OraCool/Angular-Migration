@@ -125,8 +125,15 @@ function Invoke-Angular17BreakingChanges {
                             Write-Host ""
 
                             try {
+                                # Save current directory and change to project directory
+                                $originalLocation = Get-Location
+                                Set-Location $ProjectPath
+
                                 # Run the MDC migration schematic
                                 $mdcOutput = & ng generate "@angular/material:mdc-migration" 2>&1
+
+                                # Restore original directory
+                                Set-Location $originalLocation
 
                                 if ($LASTEXITCODE -eq 0) {
                                     Write-Success "MDC migration completed successfully!"
@@ -168,6 +175,9 @@ function Invoke-Angular17BreakingChanges {
                                     Write-Success "Continuing with Angular 17 migration..."
                                 }
                                 else {
+                                    # Restore original directory
+                                    Set-Location $originalLocation
+
                                     # MDC migration failed
                                     Write-ErrorMessage "MDC migration failed!"
                                     Write-ErrorMessage "Output: $mdcOutput"
@@ -189,6 +199,11 @@ function Invoke-Angular17BreakingChanges {
                                 }
                             }
                             catch {
+                                # Restore original directory in case of error
+                                if ($originalLocation) {
+                                    Set-Location $originalLocation
+                                }
+
                                 Write-ErrorMessage "Error running MDC migration: $_"
                                 Write-Host ""
                                 Write-InfoMessage "Please run manually: ng generate @angular/material:mdc-migration"
