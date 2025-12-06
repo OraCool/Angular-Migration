@@ -313,12 +313,15 @@ Invoke-Angular17BreakingChanges -ProjectPath "."
    - Replaces `zone.js/dist/zone` → `zone.js`
    - Updates `karma.conf.js`, `test.ts`, `polyfills.ts`
 
-**What Gets Detected & Warned:**
+**What Gets Automatically Handled:**
 
-2. ⚠️ **Material MDC Migration Check** (Critical Warning)
+2. ✅ **Material MDC Migration** (Auto-run with Confirmation)
    - Scans for Material dependency
-   - Counts legacy Material component usage
-   - Warns if MDC migration required
+   - Counts legacy Material component usage (19 patterns)
+   - **Prompts to run MDC migration automatically**
+   - Executes `ng generate @angular/material:mdc-migration`
+   - Allows review before continuing
+   - **Blocks migration if declined** (prevents build failures)
 
 3. ⚠️ **Router API Removals Detection**
    - Detects: `setupTestingRouter`, `malformedUriErrorHandler`

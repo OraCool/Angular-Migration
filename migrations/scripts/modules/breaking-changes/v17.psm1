@@ -103,24 +103,141 @@ function Invoke-Angular17BreakingChanges {
                     }
 
                     if ($legacyUsageCount -gt 0) {
-                        $warnings += ""
-                        $warnings += "═══════════════════════════════════════════════════════════════════"
-                        $warnings += "⚠️  CRITICAL: Angular Material MDC Migration Required"
-                        $warnings += "═══════════════════════════════════════════════════════════════════"
-                        $warnings += ""
-                        $warnings += "Angular Material v17 has REMOVED all legacy (non-MDC) components."
-                        $warnings += "Found $legacyUsageCount potential legacy component usage(s) in your code."
-                        $warnings += ""
-                        $warnings += "BEFORE upgrading to Angular Material v17, you MUST run:"
-                        $warnings += "  ng generate @angular/material:mdc-migration"
-                        $warnings += ""
-                        $warnings += "This schematic will migrate all legacy components to MDC equivalents."
-                        $warnings += "Failure to do this will cause BUILD FAILURES in Angular Material v17."
-                        $warnings += ""
-                        $warnings += "After running the migration, review and test all Material components."
-                        $warnings += "═══════════════════════════════════════════════════════════════════"
+                        # CRITICAL: Legacy Material components detected
+                        Write-Host ""
+                        Write-Host "═══════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+                        Write-Host "  CRITICAL: Angular Material MDC Migration Required" -ForegroundColor Red
+                        Write-Host "═══════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+                        Write-Host ""
+                        Write-WarningMessage "Angular Material v17 has REMOVED all legacy (non-MDC) components."
+                        Write-WarningMessage "Found $legacyUsageCount potential legacy component usage(s) in your code."
+                        Write-Host ""
+                        Write-InfoMessage "MDC migration MUST run before upgrading to Angular 17."
+                        Write-InfoMessage "This schematic will update your components, templates, and styles."
+                        Write-Host ""
 
-                        Write-WarningMessage "  Found Material components - MDC migration may be required"
+                        # Prompt user to run MDC migration
+                        $response = Read-Host "Run Material MDC migration now? (Y/n)"
+
+                        if ($response -ne 'n' -and $response -ne 'N') {
+                            Write-InfoMessage "Running Material MDC migration..."
+                            Write-InfoMessage "Command: ng generate @angular/material:mdc-migration"
+                            Write-Host ""
+
+                            try {
+                                # Run the MDC migration schematic
+                                $mdcOutput = & ng generate "@angular/material:mdc-migration" 2>&1
+
+                                if ($LASTEXITCODE -eq 0) {
+                                    Write-Success "MDC migration completed successfully!"
+                                    Write-Host ""
+                                    Write-InfoMessage "Changes made:"
+                                    Write-InfoMessage "  - Updated Material component templates"
+                                    Write-InfoMessage "  - Migrated CSS classes (.mat-* → .mat-mdc-*)"
+                                    Write-InfoMessage "  - Updated theme configurations"
+                                    Write-Host ""
+                                    Write-WarningMessage "IMPORTANT: Please review the changes carefully!"
+                                    Write-WarningMessage "  - Check component templates for visual changes"
+                                    Write-WarningMessage "  - Verify custom theme overrides still work"
+                                    Write-WarningMessage "  - Test all Material dialogs, forms, and tables"
+                                    Write-Host ""
+
+                                    $changes += "Ran Material MDC migration (migrated $legacyUsageCount component usage(s))"
+
+                                    # Ask if user wants to review before continuing
+                                    $continueResponse = Read-Host "Continue with Angular 17 migration? (Y/n)"
+
+                                    if ($continueResponse -eq 'n' -or $continueResponse -eq 'N') {
+                                        Write-InfoMessage "Migration paused for MDC review."
+                                        Write-InfoMessage ""
+                                        Write-InfoMessage "Next steps:"
+                                        Write-InfoMessage "  1. Review changes: git diff"
+                                        Write-InfoMessage "  2. Test Material components thoroughly"
+                                        Write-InfoMessage "  3. Commit MDC changes: git add . && git commit -m 'chore: migrate to Material MDC'"
+                                        Write-InfoMessage "  4. Re-run Angular 17 migration when ready"
+
+                                        return @{
+                                            Success  = $true
+                                            Message  = "MDC migration completed - paused for review"
+                                            Changes  = $changes
+                                            Warnings = @("Migration paused at user request for MDC review")
+                                            Errors   = @()
+                                        }
+                                    }
+
+                                    Write-Success "Continuing with Angular 17 migration..."
+                                }
+                                else {
+                                    # MDC migration failed
+                                    Write-ErrorMessage "MDC migration failed!"
+                                    Write-ErrorMessage "Output: $mdcOutput"
+                                    Write-Host ""
+                                    Write-ErrorMessage "Cannot continue with Angular 17 migration."
+                                    Write-InfoMessage "Troubleshooting:"
+                                    Write-InfoMessage "  1. Review the error output above"
+                                    Write-InfoMessage "  2. Fix any issues with your Material components"
+                                    Write-InfoMessage "  3. Run manually: ng generate @angular/material:mdc-migration"
+                                    Write-InfoMessage "  4. Re-run Angular 17 migration when ready"
+
+                                    return @{
+                                        Success  = $false
+                                        Message  = "MDC migration failed"
+                                        Changes  = $changes
+                                        Warnings = $warnings
+                                        Errors   = @("ng generate @angular/material:mdc-migration failed with exit code $LASTEXITCODE")
+                                    }
+                                }
+                            }
+                            catch {
+                                Write-ErrorMessage "Error running MDC migration: $_"
+                                Write-Host ""
+                                Write-InfoMessage "Please run manually: ng generate @angular/material:mdc-migration"
+
+                                $warnings += "Could not automatically run MDC migration - please run manually"
+                            }
+                        }
+                        else {
+                            # User declined MDC migration
+                            Write-Host ""
+                            Write-WarningMessage "⚠️  Skipping MDC migration - This is NOT recommended!"
+                            Write-Host ""
+                            Write-ErrorMessage "Angular Material v17 will FAIL without MDC migration."
+                            Write-InfoMessage "You have two options:"
+                            Write-InfoMessage "  1. Cancel now and run: ng generate @angular/material:mdc-migration"
+                            Write-InfoMessage "  2. Continue anyway (migration will likely FAIL)"
+                            Write-Host ""
+
+                            $forceResponse = Read-Host "Continue without MDC migration? (y/N)"
+
+                            if ($forceResponse -ne 'y' -and $forceResponse -ne 'Y') {
+                                Write-InfoMessage "Migration cancelled."
+                                Write-InfoMessage ""
+                                Write-InfoMessage "To migrate properly:"
+                                Write-InfoMessage "  1. Run: ng generate @angular/material:mdc-migration"
+                                Write-InfoMessage "  2. Review and test the changes"
+                                Write-InfoMessage "  3. Re-run Angular 17 migration"
+
+                                return @{
+                                    Success  = $false
+                                    Message  = "Migration cancelled - MDC migration required"
+                                    Changes  = $changes
+                                    Warnings = @("User cancelled migration to run MDC migration manually")
+                                    Errors   = @()
+                                }
+                            }
+
+                            # User chose to continue without MDC migration (risky!)
+                            Write-WarningMessage "Continuing without MDC migration - expect BUILD FAILURES!"
+                            $warnings += ""
+                            $warnings += "═══════════════════════════════════════════════════════════════════"
+                            $warnings += "⚠️  WARNING: MDC Migration Skipped"
+                            $warnings += "═══════════════════════════════════════════════════════════════════"
+                            $warnings += "User chose to skip Material MDC migration."
+                            $warnings += "Angular Material v17 upgrade will likely FAIL."
+                            $warnings += ""
+                            $warnings += "To fix, run: ng generate @angular/material:mdc-migration"
+                            $warnings += "═══════════════════════════════════════════════════════════════════"
+                        }
                     }
                     else {
                         Write-InfoMessage "  No legacy Material component patterns detected"
