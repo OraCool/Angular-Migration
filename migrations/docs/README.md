@@ -113,6 +113,8 @@ Angular 15 Upgrade ────────────────────�
     ↓                                     │
 Angular 16 Upgrade ─────────────────────┤
     ↓                                     │
+[Optional: Signals Migration] ──────────┤
+    ↓                                     │
 Angular 17 Upgrade ─────────────────────┤
     ├─ + Control Flow Migration          │
     ↓                                     │
@@ -132,6 +134,11 @@ Post-Migration Validation
 - Converts NgModule-based components to standalone
 - Recommended before v17 upgrade
 - See: [optional-standalone-migration.md](optional-standalone-migration.md)
+
+**Signal-Based Components** (After v16+, After Standalone)
+- Converts to signal-based reactive state management
+- Requires standalone components and OnPush change detection
+- See: [optional-signals-migration.md](optional-signals-migration.md)
 
 **Control Flow Migration** (After v17)
 - Converts `*ngIf/*ngFor/*ngSwitch` to `@if/@for/@switch`
@@ -162,6 +169,7 @@ Post-Migration Validation
 | Document | Description | When to Apply |
 |----------|-------------|---------------|
 | [optional-standalone-migration.md](optional-standalone-migration.md) | Standalone components migration | After v15, before v17 |
+| [optional-signals-migration.md](optional-signals-migration.md) | Signal-based components migration | After v16, after standalone |
 | [optional-control-flow-migration.md](optional-control-flow-migration.md) | Control flow syntax migration | After v17 |
 
 ### Post-Migration
@@ -217,7 +225,8 @@ All scripts are located in `migrations/scripts/`
 ### Optional Migration Scripts
 ```powershell
 # Optional migrations
-.\migrate-standalone-components.ps1 -ProjectPath "C:\MyProject"
+.\migrate-to-standalone.ps1 -ProjectPath "C:\MyProject" -TargetScope all
+.\migrate-to-signals.ps1 -ProjectPath "C:\MyProject" -TargetScope all
 .\migrate-control-flow.ps1 -ProjectPath "C:\MyProject"
 ```
 
@@ -230,6 +239,8 @@ The scripts use modular PowerShell functions located in `migrations/scripts/modu
 - **BreakingChanges.psm1** - Automated breaking changes fixes
 - **Validation.psm1** - Build, test, and lint validation
 - **Migration.psm1** - Core migration orchestration
+- **StandaloneMigration.psm1** - Standalone components conversion utilities
+- **SignalsMigration.psm1** - Signal-based components conversion utilities
 
 #### Using Modules Directly
 
@@ -374,6 +385,7 @@ Use this checklist to track your migration progress:
 
 **Optional:**
 - [ ] Standalone components migration ([optional-standalone-migration.md](optional-standalone-migration.md))
+- [ ] Signal-based components migration ([optional-signals-migration.md](optional-signals-migration.md))
 - [ ] Control flow migration ([optional-control-flow-migration.md](optional-control-flow-migration.md))
 
 ---

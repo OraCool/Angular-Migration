@@ -161,6 +161,147 @@ export class CustomInputComponent implements ControlValueAccessor {
 
 ---
 
+## 🤖 Automated Breaking Changes Fixes
+
+The migration script (`fix-breaking-changes-v15.ps1` or `migrate-to-v15.ps1`) **automatically fixes** the following breaking changes:
+
+### 1. DATE_PIPE_DEFAULT_TIMEZONE → DATE_PIPE_DEFAULT_OPTIONS ✅
+
+**What it does:**
+- Searches for `DATE_PIPE_DEFAULT_TIMEZONE` in module files (`.module.ts`, `providers.ts`, `app.config.ts`)
+- Replaces import statements: `DATE_PIPE_DEFAULT_TIMEZONE` → `DATE_PIPE_DEFAULT_OPTIONS`
+- Wraps timezone value in object: `useValue: 'UTC'` → `useValue: { timezone: 'UTC' }`
+
+**Example:**
+```typescript
+// BEFORE (automatically detected and fixed)
+import { DATE_PIPE_DEFAULT_TIMEZONE } from '@angular/common';
+
+providers: [
+  { provide: DATE_PIPE_DEFAULT_TIMEZONE, useValue: 'America/New_York' }
+]
+
+// AFTER (automatic transformation)
+import { DATE_PIPE_DEFAULT_OPTIONS } from '@angular/common';
+
+providers: [
+  { provide: DATE_PIPE_DEFAULT_OPTIONS, useValue: { timezone: 'America/New_York' } }
+]
+```
+
+### 2. Material Chips API Migration ✅
+
+**What it does:**
+- Searches for `<mat-chip-list>` tags in all HTML template files
+- Replaces opening tags: `<mat-chip-list>` → `<mat-chip-set>`
+- Replaces closing tags: `</mat-chip-list>` → `</mat-chip-set>`
+- Preserves all attributes, bindings, and directives
+- Keeps `<mat-chip>` tags unchanged
+
+**Example:**
+```html
+<!-- BEFORE (automatically detected and fixed) -->
+<mat-chip-list [selectable]="true" aria-label="Fruit selection">
+  <mat-chip *ngFor="let fruit of fruits">{{ fruit }}</mat-chip>
+</mat-chip-list>
+
+<!-- AFTER (automatic transformation) -->
+<mat-chip-set [selectable]="true" aria-label="Fruit selection">
+  <mat-chip *ngFor="let fruit of fruits">{{ fruit }}</mat-chip>
+</mat-chip-set>
+```
+
+**Benefits:**
+- ✅ Saves time on manual find-and-replace
+- ✅ Ensures consistency across all files
+- ✅ Reduces risk of missed updates
+- ✅ Safe to re-run (idempotent)
+
+---
+
+## ⚠️ Manual Fixes Required
+
+The migration script **cannot automatically fix** these breaking changes. You must address them manually:
+
+### 1. RxJS Subscribe Syntax (High Priority)
+
+**Issue:** The old subscribe syntax with multiple callback parameters is deprecated.
+
+**Action Required:**
+```typescript
+// OLD (deprecated - search for this pattern)
+this.service.getData().subscribe(
+  data => console.log(data),
+  error => console.error(error),
+  () => console.log('complete')
+);
+
+// NEW (required in Angular 15)
+this.service.getData().subscribe({
+  next: data => console.log(data),
+  error: error => console.error(error),
+  complete: () => console.log('complete')
+});
+```
+
+**How to fix:**
+1. Search your IDE for `.subscribe(` to find all usages
+2. Update each occurrence to use object notation
+3. Or use your IDE's automated refactoring (if available)
+
+### 2. ControlValueAccessor.setDisabledState (Medium Priority)
+
+**Issue:** The `setDisabledState` method is now required in custom form controls.
+
+**Action Required:**
+```typescript
+export class CustomInputComponent implements ControlValueAccessor {
+  writeValue(value: any): void { }
+  registerOnChange(fn: any): void { }
+  registerOnTouched(fn: any): void { }
+
+  // NOW REQUIRED - add this method
+  setDisabledState(isDisabled: boolean): void {
+    this.disabled = isDisabled;
+  }
+}
+```
+
+**How to fix:**
+1. Search for: `implements ControlValueAccessor`
+2. Ensure each implementation has `setDisabledState` method
+3. See [example above](#4-setdisabledstate-in-custom-form-controls)
+
+### 3. Functional Router Guards (Optional - Low Priority)
+
+**Issue:** Class-based guards still work but functional guards are recommended.
+
+**Action Required:** Optional - can be deferred to future migration
+
+**How to fix:**
+- See [Router Guards section](#1-router-canactivate-functional-guards) for migration examples
+- Consider migrating during Angular 16+ upgrade
+
+### 4. TypeScript Strict Mode (Informational)
+
+**Issue:** TypeScript 4.8+ has stricter null/undefined checks.
+
+**Action Required:** Fix TypeScript compiler errors during build
+
+**How to fix:**
+```typescript
+// Add type unions for nullable values
+user: User | null = null;
+
+// Use optional chaining
+this.user?.name
+
+// Use nullish coalescing
+const name = this.user?.name ?? 'Default';
+```
+
+---
+
 ## 🚀 Migration Steps
 
 ### Step 1: Verify Prerequisites

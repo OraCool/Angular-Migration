@@ -301,6 +301,47 @@ Make sure routing is configured with `provideRouter()` in app.config.ts.
 5. Create example migrations
 6. Document edge cases
 
+## After Standalone Migration
+
+Once you've successfully migrated to standalone components, consider these next steps:
+
+### 1. Signal-Based Components Migration (Recommended)
+
+Standalone components are a prerequisite for signal-based components migration. Signals provide:
+- Fine-grained reactive state management
+- Better performance with OnPush change detection
+- Simpler code with less RxJS boilerplate
+- Foundation for zoneless Angular
+
+**See:** [optional-signals-migration.md](optional-signals-migration.md)
+
+```powershell
+# After standalone migration is complete
+.\migrate-to-signals.ps1 -TargetScope all
+```
+
+### 2. Control Flow Migration
+
+After migrating to Angular 17+, modernize your templates with the new control flow syntax:
+- `*ngIf` → `@if`
+- `*ngFor` → `@for`
+- `*ngSwitch` → `@switch`
+
+**See:** [optional-control-flow-migration.md](optional-control-flow-migration.md)
+
+### 3. OnPush Change Detection
+
+Optimize performance by adding OnPush change detection to all components:
+
+```typescript
+@Component({
+  selector: 'app-user',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush, // Add this
+  // ...
+})
+```
+
 ---
 
 **Status**: Script framework created, implementation in progress
