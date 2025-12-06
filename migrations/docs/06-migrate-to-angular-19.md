@@ -38,73 +38,162 @@ Angular 19 makes zoneless change detection stable, introduces standalone compone
 
 ### Breaking Changes
 
-#### 1. Standalone Components by Default
+The migration is organized into three categories based on automation level:
 
-**New projects** created with Angular 19 use standalone components by default.
+---
 
-**Migration for existing apps:**
+**What Gets Automatically Fixed by v19.psm1:**
 
+#### 1. TranslateHttpLoader Constructor ✅ **AUTO-FIXED**
+
+The migration script automatically fixes `@ngx-translate/http-loader@17.0.0` constructor:
+
+**Before:**
 ```typescript
-// Before (NgModule-based)
+new TranslateHttpLoader(http, './assets/i18n/', '.json')
+```
+
+**After:**
+```typescript
+new TranslateHttpLoader(http) // Parameters removed in v17.0.0
+```
+
+#### 2. Standalone Components in NgModules ✅ **AUTO-FIXED**
+
+The migration script moves standalone components from `declarations` to `imports`:
+
+**Before:**
+```typescript
 @NgModule({
-  declarations: [AppComponent, HeaderComponent],
-  imports: [BrowserModule, CommonModule],
-  providers: [],
-  bootstrap: [AppComponent]
+  declarations: [MyStandaloneComponent], // ❌ Error in Angular 19
+  imports: [CommonModule]
 })
-export class AppModule {}
 ```
 
-**After (Standalone - Recommended):**
+**After:**
 ```typescript
-// app.component.ts
-import { Component } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
-import { HeaderComponent } from './header.component';
-
-@Component({
-  selector: 'app-root',
-  standalone: true,
-  imports: [RouterOutlet, HeaderComponent],
-  template: `
-    <app-header />
-    <router-outlet />
-  `
+@NgModule({
+  declarations: [],
+  imports: [CommonModule, MyStandaloneComponent] // ✅ Correct
 })
-export class AppComponent {}
-
-// main.ts
-import { bootstrapApplication } from '@angular/platform-browser';
-import { appConfig } from './app/app.config';
-import { AppComponent } from './app/app.component';
-
-bootstrapApplication(AppComponent, appConfig);
 ```
 
-**Note**: NgModule-based apps still work in Angular 19. Migration to standalone is optional but recommended.
+#### 3. AG-Grid v32 API Changes ✅ **AUTO-FIXED**
 
-#### 2. Zoneless Change Detection (Stable)
+The migration script updates AG-Grid v32 API usage:
 
-Can now remove zone.js dependency:
+**Changes:**
+- Removes `ColumnApi` imports and usage
+- `setRowData()` → `setGridOption('rowData', data)`
+- `setQuickFilter()` → `setGridOption('quickFilterText', text)`
+
+#### 4. i18n Service Return Types ✅ **AUTO-FIXED**
+
+Fixes readonly return type for `getLangs()` method.
+
+---
+
+**What Gets Automatically Detected:**
+
+#### 5. BrowserModule.withServerTransition() Removed ⚠️ **CRITICAL - DETECTED**
+
+The migration script detects this removed API:
 
 **Before (Angular 18):**
 ```typescript
-// main.ts
-import 'zone.js'; // Required
+import { BrowserModule } from '@angular/platform-browser';
 
-import { bootstrapApplication } from '@angular/platform-browser';
-import { AppComponent } from './app/app.component';
-
-bootstrapApplication(AppComponent);
+@NgModule({
+  imports: [
+    BrowserModule.withServerTransition({ appId: 'my-app' }) // ❌ REMOVED
+  ]
+})
 ```
 
-**After (Angular 19 - Zoneless):**
+**After (Angular 19):**
 ```typescript
-// main.ts
-// No zone.js import needed!
+import { BrowserModule } from '@angular/platform-browser';
+import { APP_ID } from '@angular/core';
 
+@NgModule({
+  imports: [BrowserModule],
+  providers: [{ provide: APP_ID, useValue: 'my-app' }] // ✅ New approach
+})
+```
+
+#### 6. KeyValueDiffers.factories Removed ⚠️ **DETECTED**
+
+The migration script detects usage of the removed `.factories` property.
+
+**Migration:** Remove all usage of `KeyValueDiffers.factories`.
+
+#### 7. Testability Methods Removed ⚠️ **DETECTED**
+
+The migration script detects removed zone.js-specific methods:
+- `increasePendingRequestCount()`
+- `decreasePendingRequestCount()`
+- `getPendingRequestCount()`
+
+**Migration:** Not needed for zoneless apps.
+
+#### 8. ApplicationRef.tick() Error Handling Changed ⚠️ **DETECTED**
+
+**Impact:** No longer catches errors and reports to ErrorHandler.
+
+**Migration:** Wrap `tick()` calls in try-catch if needed.
+
+#### 9. HTTP Caching with Auth Headers ⚠️ **DETECTED**
+
+**Impact:** Requests with authorization headers now prevented from caching by default.
+
+**Migration (to opt-out):**
+```typescript
+import { provideHttpClient, withHttpTransferCache } from '@angular/common/http';
+
+bootstrapApplication(AppComponent, {
+  providers: [
+    provideHttpClient(
+      withHttpTransferCache({
+        includeRequestsWithAuthHeaders: true // Restore old behavior
+      })
+    )
+  ]
+});
+```
+
+#### 10. @localize Schematic Changes ⚠️ **DETECTED**
+
+**Migration:**
+```bash
+# Before
+ng add @angular/localize --name=my-app
+
+# After
+ng add @angular/localize --project=my-app
+```
+
+#### 11. TypeScript <5.9 No Longer Supported ⚠️ **DETECTED**
+
+**Requirement:** TypeScript 5.9 or higher
+
+The migration script checks your `package.json` and warns if TypeScript version is too old.
+
+---
+
+**What Requires Manual Review (New Features):**
+
+#### 12. Standalone Components by Default
+
+**New projects** created with Angular 19 use standalone components by default.
+
+**Note**: NgModule-based apps still work in Angular 19. Migration to standalone is optional but recommended.
+
+#### 13. Zoneless Change Detection (Stable)
+
+Can now remove zone.js dependency (~50KB saved):
+
+```typescript
 import { bootstrapApplication, provideExperimentalZonelessChangeDetection } from '@angular/platform-browser';
-import { AppComponent } from './app/app.component';
 
 bootstrapApplication(AppComponent, {
   providers: [
@@ -113,37 +202,11 @@ bootstrapApplication(AppComponent, {
 });
 ```
 
-**Benefits:**
-- Smaller bundle size (~50KB saved)
-- Better performance
-- Simpler debugging
-- Works great with signals
-
-**Requirements for zoneless:**
+**Requirements:**
 - Use signals or `OnPush` strategy
 - Call `ChangeDetectorRef.markForCheck()` when using observables
 
-#### 3. `TestBed` API Changes
-
-**Before:**
-```typescript
-import { TestBed } from '@angular/core/testing';
-
-TestBed.configureTestingModule({
-  declarations: [MyComponent]
-});
-```
-
-**After (for standalone components):**
-```typescript
-import { TestBed } from '@angular/core/testing';
-
-TestBed.configureTestingModule({
-  imports: [MyComponent] // Standalone components go in imports
-});
-```
-
-#### 4. Router `redirectTo` Function Support
+#### 14. Router `redirectTo` Function Support
 
 **New in Angular 19:**
 ```typescript
@@ -237,51 +300,98 @@ npx ng update @angular/cli@19 --migrate-only --allow-dirty
 npx ng update @angular/material@19 --migrate-only --allow-dirty
 ```
 
-### Step 7: Fix Breaking Changes
+### Step 7: Apply Breaking Changes Fixes
+
+The migration script automatically applies breaking changes fixes:
 
 ```powershell
-# Automated fixes
-..\migrations\scripts\fix-breaking-changes-v19.ps1
-
-# Or use module function
-Import-Module ..\migrations\scripts\modules\BreakingChanges.psm1
-Invoke-BreakingChangesFix -ProjectPath "." -Version "19"
+# This happens automatically during migrate-to-v19.ps1
+# Or run manually:
+Import-Module ..\migrations\scripts\modules\breaking-changes\v19.psm1
+Invoke-Angular19BreakingChanges -ProjectPath "."
 ```
 
-**Manual Fixes:**
+**What This Step Does:**
 
-1. **Update TestBed for Standalone Components:**
+**Section 1: Official Angular 19 Core Breaking Changes (7 Detections)**
+1. ⚠️ **BrowserModule.withServerTransition()** - Detects usage, shows CRITICAL migration warning
+2. ⚠️ **KeyValueDiffers.factories** - Detects removed property usage
+3. ⚠️ **Testability methods** - Detects zone.js-specific methods removal
+4. ⚠️ **ApplicationRef.tick()** - Detects usage, warns about error handling change
+5. ⚠️ **HTTP caching** - Detects withHttpTransferCache usage, warns about auth headers
+6. ⚠️ **@localize schematic** - Warns about option name change
+7. ⚠️ **TypeScript version** - Checks package.json, warns if <5.9
 
-```bash
-# Find test files
-grep -r "TestBed.configureTestingModule" src/**/*.spec.ts
+**Section 2: Third-Party Library Migrations (4 Automated Fixes)**
+8. ✅ **TranslateHttpLoader** - Automatically removes constructor parameters
+9. ✅ **Standalone components** - Automatically moves from declarations to imports
+10. ✅ **AG-Grid v32** - Automatically updates API calls
+11. ✅ **i18n.service** - Automatically fixes return type
+
+**Section 3: Comprehensive Warnings**
+- All 11 breaking changes with migration examples
+- New features overview (resource(), linkedSignal(), zoneless)
+- Recommended actions and testing checklist
+
+**Expected Output:**
+```
+🔧 Applying Angular 19 breaking changes and migrations...
+
+📋 Section 1: Official Angular 19 Core Breaking Changes
+═══════════════════════════════════════════════════════
+📝 Checking for BrowserModule.withServerTransition() usage...
+  ✓ No BrowserModule.withServerTransition() usage found
+📝 Checking for KeyValueDiffers.factories usage...
+  ✓ No KeyValueDiffers.factories usage found
+📝 Checking for removed Testability methods...
+  ✓ No removed Testability methods found
+📝 Checking for ApplicationRef.tick() usage...
+  ✓ No ApplicationRef.tick() usage found
+📝 Checking for HTTP transfer cache usage...
+  ✓ No withHttpTransferCache usage found
+📝 Checking TypeScript version requirements...
+  ✓ TypeScript version 5.5.4 is supported
+✅ Section 1 complete: Official Angular 19 breaking changes checked
+
+📦 Section 2: Third-Party Library Migrations
+═══════════════════════════════════════════════════════
+📝 Fixing @ngx-translate/http-loader@17.0.0 constructor...
+✅   Fixed TranslateHttpLoader in 2 file(s)
+📝 Fixing standalone components in NgModules...
+  Found 3 standalone component(s) in app.module.ts
+✅   Fixed standalone components in 1 module(s)
+📝 Fixing AG-Grid v32 API changes...
+✅   Fixed AG-Grid API in 5 file(s)
+📝 Fixing i18n.service getLangs() return type...
+✅   Fixed i18n.service return type
+✅ Section 2 complete: Third-party library migrations applied
+
+⚠️  Section 3: Comprehensive Migration Warnings
+═══════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════
+Angular 19 Migration Summary
+═══════════════════════════════════════════════════════
+✅ Applied 11 automated fix(es)
+⚠️  Found 50+ warning(s) - manual review recommended
 ```
 
-Update each:
-```typescript
-// If MyComponent is standalone, move to imports:
-TestBed.configureTestingModule({
-  imports: [MyComponent], // Changed from declarations
-  providers: [MyService]
-});
-```
+**Manual Fixes (if needed):**
 
-2. **Consider Enabling Zoneless (Optional):**
+1. **If BrowserModule.withServerTransition() detected:**
+   - Replace with `providers: [{ provide: APP_ID, useValue: 'my-app' }]`
 
-```typescript
-// main.ts
-import { bootstrapApplication, provideExperimentalZonelessChangeDetection } from '@angular/platform-browser';
+2. **If TypeScript <5.9:**
+   - Update TypeScript: `npm install --save-dev typescript@~5.9`
 
-bootstrapApplication(AppComponent, {
-  providers: [
-    provideExperimentalZonelessChangeDetection()
-  ]
-});
-```
+3. **Consider Enabling Zoneless (Optional):**
+   ```typescript
+   import { provideExperimentalZonelessChangeDetection } from '@angular/platform-browser';
 
-If enabling zoneless, ensure:
-- All components use signals or OnPush
-- Call `markForCheck()` when using observables
+   bootstrapApplication(AppComponent, {
+     providers: [provideExperimentalZonelessChangeDetection()]
+   });
+   ```
 
 ### Step 8: Build the Project
 
@@ -329,8 +439,12 @@ npm start
 - [ ] Application loads
 - [ ] Routing works
 - [ ] Forms work
+- [ ] ngx-translate works (TranslateHttpLoader fix)
+- [ ] AG-Grid works (v32 API changes)
+- [ ] Standalone components work correctly
 - [ ] Change detection works (if zoneless)
-- [ ] Async operations work
+- [ ] HTTP caching works (check auth headers)
+- [ ] No BrowserModule.withServerTransition errors
 - [ ] No console errors
 
 ### Step 12: Commit Changes
@@ -341,7 +455,13 @@ git commit -m "chore: migrate to Angular 19
 
 - Updated all @angular packages to 19.0.0
 - Updated TypeScript to 5.5.4
-- Updated TestBed configurations
+- Updated @ngx-translate/http-loader to 17.0.0
+- Updated AG-Grid to v32
+- Fixed TranslateHttpLoader constructor
+- Fixed standalone components in NgModules
+- Fixed AG-Grid v32 API usage
+- Checked for BrowserModule.withServerTransition removal
+- Verified TypeScript version requirements
 - All tests passing"
 git push
 ```
@@ -452,7 +572,12 @@ npm install
 - [ ] Linter passes
 - [ ] Dev server starts
 - [ ] Application works correctly
-- [ ] TestBed configurations updated
+- [ ] TranslateHttpLoader constructor updated
+- [ ] Standalone components moved to imports
+- [ ] AG-Grid v32 API working
+- [ ] No BrowserModule.withServerTransition usage
+- [ ] TypeScript 5.9+ installed
+- [ ] HTTP caching verified (if using withHttpTransferCache)
 - [ ] Zoneless works (if enabled)
 - [ ] Changes committed to git
 
