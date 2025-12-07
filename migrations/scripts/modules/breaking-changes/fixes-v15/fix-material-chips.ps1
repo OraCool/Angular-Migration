@@ -3,11 +3,21 @@
     Migrates Material Chips API from Angular 14 to Angular 15.
 
 .DESCRIPTION
-    Performs the following transformations:
-    1. mat-chip-list → mat-chip-set (for non-selectable chips)
-    2. mat-chip-list → mat-chip-listbox (for selectable chips)
-    3. mat-chip → mat-chip-option (for selectable chips)
-    4. [selected] → [highlighted] (for non-selectable chips)
+    Performs the following transformations with intelligent detection:
+
+    CHIP GRIDS (form inputs with matChipInputFor):
+    1. mat-chip-list → mat-chip-grid
+    2. mat-chip → mat-chip-row
+    3. #chipList → #chipGrid (template variable)
+
+    SELECTABLE CHIPS (with [selected] property):
+    1. mat-chip-list → mat-chip-listbox
+    2. mat-chip → mat-chip-option
+    3. [selected] → kept as [selected]
+
+    NON-SELECTABLE CHIPS (display only):
+    1. mat-chip-list → mat-chip-set
+    2. [selected] → [highlighted]
 
 .PARAMETER ProjectPath
     Path to the Angular project (default: current directory).
@@ -22,9 +32,9 @@
     .\fix-material-chips.ps1 -DryRun
 
 .NOTES
-    Version: 1.0.0
+    Version: 2.0.0 (Enhanced with chip grid support)
     Related: Angular Material 15 Migration
-    Fixes: Can't bind to 'selected' on 'mat-chip', mat-chip-list is unknown
+    Fixes: mat-chip-list is unknown, Can't bind to 'selected' on 'mat-chip'
 #>
 
 param(
@@ -37,7 +47,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ModulesPath = Join-Path $PSScriptRoot "..\modules"
+$ModulesPath = Join-Path $PSScriptRoot "..\.."
 Import-Module (Join-Path $ModulesPath "Utilities.psm1") -Force
 
 $ProjectPath = Resolve-Path $ProjectPath
@@ -95,52 +105,93 @@ try {
             $changes = @()
             $modified = $false
 
-            # Determine if chips are selectable
-            $hasSelectableChips = $content -match '<mat-chip[^>]*\[selected\]'
+            # PRIORITY 1: Check if this is a chip input (form field with matChipInputFor)
+            $hasChipInput = $content -match 'matChipInputFor'
 
-            if ($hasSelectableChips) {
-                # SELECTABLE CHIPS PATH
+            if ($hasChipInput) {
+                # CHIP GRID PATH (for form inputs)
 
-                # Convert mat-chip-list → mat-chip-listbox
+                # Convert mat-chip-list → mat-chip-grid
                 if ($content -match '<mat-chip-list') {
                     $listCount = ([regex]::Matches($content, '<mat-chip-list')).Count
-                    $content = $content -replace '<mat-chip-list(\s|>)', '<mat-chip-listbox$1'
-                    $content = $content -replace '</mat-chip-list>', '</mat-chip-listbox>'
-                    $changes += "mat-chip-list → mat-chip-listbox ($listCount)"
+                    $content = $content -replace '<mat-chip-list(\s|>)', '<mat-chip-grid$1'
+                    $content = $content -replace '</mat-chip-list>', '</mat-chip-grid>'
+                    $changes += "mat-chip-list → mat-chip-grid ($listCount)"
                     $modified = $true
                 }
 
-                # Convert mat-chip → mat-chip-option
+                # Convert mat-chip → mat-chip-row
                 if ($content -match '<mat-chip') {
                     $chipCount = ([regex]::Matches($content, '<mat-chip(\s|>)')).Count
-                    $content = $content -replace '<mat-chip(\s)', '<mat-chip-option$1'
-                    $content = $content -replace '<mat-chip>', '<mat-chip-option>'
-                    $content = $content -replace '</mat-chip>', '</mat-chip-option>'
-                    $changes += "mat-chip → mat-chip-option ($chipCount)"
+                    $content = $content -replace '<mat-chip(\s)', '<mat-chip-row$1'
+                    $content = $content -replace '<mat-chip>', '<mat-chip-row>'
+                    $content = $content -replace '</mat-chip>', '</mat-chip-row>'
+                    $changes += "mat-chip → mat-chip-row ($chipCount)"
                     $modified = $true
                 }
 
-                # [selected] stays as [selected] for mat-chip-option
-                $changes += "[selected] kept for mat-chip-option"
+                # Update template variable references (e.g., #chipList → #chipGrid)
+                if ($content -match '#\w+(?=\s|>)') {
+                    $oldVarName = $null
+                    if ($content -match '#(chipList|chiplist)') {
+                        $oldVarName = $matches[1]
+                        $content = $content -replace "#$oldVarName", '#chipGrid'
+                        $content = $content -replace "\[matChipInputFor\]=""$oldVarName""", '[matChipInputFor]="chipGrid"'
+                        $content = $content -replace "\[matChipInputFor\]='$oldVarName'", "[matChipInputFor]='chipGrid'"
+                        $content = $content -replace "\[matChipInputFor\]=$oldVarName", "[matChipInputFor]=chipGrid"
+                        $changes += "Updated template variable: #$oldVarName → #chipGrid"
+                        $modified = $true
+                    }
+                }
             }
             else {
-                # NON-SELECTABLE CHIPS PATH
+                # PRIORITY 2: Determine if chips are selectable
+                $hasSelectableChips = $content -match '<mat-chip[^>]*\[selected\]'
 
-                # Convert mat-chip-list → mat-chip-set
-                if ($content -match '<mat-chip-list') {
-                    $listCount = ([regex]::Matches($content, '<mat-chip-list')).Count
-                    $content = $content -replace '<mat-chip-list(\s|>)', '<mat-chip-set$1'
-                    $content = $content -replace '</mat-chip-list>', '</mat-chip-set>'
-                    $changes += "mat-chip-list → mat-chip-set ($listCount)"
-                    $modified = $true
+                if ($hasSelectableChips) {
+                    # SELECTABLE CHIPS PATH
+
+                    # Convert mat-chip-list → mat-chip-listbox
+                    if ($content -match '<mat-chip-list') {
+                        $listCount = ([regex]::Matches($content, '<mat-chip-list')).Count
+                        $content = $content -replace '<mat-chip-list(\s|>)', '<mat-chip-listbox$1'
+                        $content = $content -replace '</mat-chip-list>', '</mat-chip-listbox>'
+                        $changes += "mat-chip-list → mat-chip-listbox ($listCount)"
+                        $modified = $true
+                    }
+
+                    # Convert mat-chip → mat-chip-option
+                    if ($content -match '<mat-chip') {
+                        $chipCount = ([regex]::Matches($content, '<mat-chip(\s|>)')).Count
+                        $content = $content -replace '<mat-chip(\s)', '<mat-chip-option$1'
+                        $content = $content -replace '<mat-chip>', '<mat-chip-option>'
+                        $content = $content -replace '</mat-chip>', '</mat-chip-option>'
+                        $changes += "mat-chip → mat-chip-option ($chipCount)"
+                        $modified = $true
+                    }
+
+                    # [selected] stays as [selected] for mat-chip-option
+                    $changes += "[selected] kept for mat-chip-option"
                 }
+                else {
+                    # NON-SELECTABLE CHIPS PATH
 
-                # Convert [selected] → [highlighted] for non-selectable chips
-                if ($content -match '\[selected\]') {
-                    $selectedCount = ([regex]::Matches($content, '\[selected\]')).Count
-                    $content = $content -replace '\[selected\]', '[highlighted]'
-                    $changes += "[selected] → [highlighted] ($selectedCount)"
-                    $modified = $true
+                    # Convert mat-chip-list → mat-chip-set
+                    if ($content -match '<mat-chip-list') {
+                        $listCount = ([regex]::Matches($content, '<mat-chip-list')).Count
+                        $content = $content -replace '<mat-chip-list(\s|>)', '<mat-chip-set$1'
+                        $content = $content -replace '</mat-chip-list>', '</mat-chip-set>'
+                        $changes += "mat-chip-list → mat-chip-set ($listCount)"
+                        $modified = $true
+                    }
+
+                    # Convert [selected] → [highlighted] for non-selectable chips
+                    if ($content -match '\[selected\]') {
+                        $selectedCount = ([regex]::Matches($content, '\[selected\]')).Count
+                        $content = $content -replace '\[selected\]', '[highlighted]'
+                        $changes += "[selected] → [highlighted] ($selectedCount)"
+                        $modified = $true
+                    }
                 }
             }
 

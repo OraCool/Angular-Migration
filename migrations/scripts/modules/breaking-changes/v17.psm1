@@ -21,6 +21,9 @@
 $ErrorActionPreference = 'Stop'
 
 # Import required modules
+$UtilitiesModule = Join-Path $PSScriptRoot "..\Utilities.psm1"
+Import-Module $UtilitiesModule -DisableNameChecking
+
 $CommonModule = Join-Path $PSScriptRoot "common.psm1"
 Import-Module $CommonModule -DisableNameChecking
 

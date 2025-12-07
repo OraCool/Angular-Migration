@@ -48,7 +48,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ModulesPath = Join-Path $PSScriptRoot "..\modules"
+$ModulesPath = Join-Path $PSScriptRoot "..\.."
 Import-Module (Join-Path $ModulesPath "Utilities.psm1") -Force
 
 $ProjectPath = Resolve-Path $ProjectPath

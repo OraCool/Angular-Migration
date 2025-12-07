@@ -12,13 +12,13 @@ export const ANGULAR_VERSION = {
   MIN_SUPPORTED: 14,
 
   /** Maximum supported Angular major version */
-  MAX_SUPPORTED: 20,
+  MAX_SUPPORTED: 21,
 
   /** Default target version for migrations */
-  DEFAULT_TARGET: 20,
+  DEFAULT_TARGET: 21,
 
   /** Supported version range for display */
-  SUPPORTED_RANGE: '14-20',
+  SUPPORTED_RANGE: '14-21',
 } as const;
 
 /**
@@ -54,6 +54,21 @@ export const FILE_PATTERNS = {
   /** All TypeScript files glob pattern */
   ALL_TS: '**/*.ts',
 
+  /** JSON file extension */
+  JSON: '.json',
+
+  /** SCSS file extension */
+  SCSS: '.scss',
+
+  /** SASS file extension */
+  SASS: '.sass',
+
+  /** CSS file extension */
+  CSS: '.css',
+
+  /** HTML file extension */
+  HTML: '.html',
+
   /** Package.json filename */
   PACKAGE_JSON: 'package.json',
 
@@ -62,6 +77,9 @@ export const FILE_PATTERNS = {
 
   /** tsconfig.json filename */
   TSCONFIG_JSON: 'tsconfig.json',
+
+  /** tsconfig pattern */
+  TSCONFIG_PATTERN: 'tsconfig',
 } as const;
 
 /**

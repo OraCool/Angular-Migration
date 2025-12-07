@@ -50,6 +50,9 @@
 $ErrorActionPreference = 'Stop'
 
 # Import required modules
+$UtilitiesModule = Join-Path $PSScriptRoot "..\Utilities.psm1"
+Import-Module $UtilitiesModule -DisableNameChecking
+
 $CommonModule = Join-Path $PSScriptRoot "common.psm1"
 Import-Module $CommonModule -DisableNameChecking
 
@@ -127,13 +130,13 @@ function Invoke-Angular15BreakingChanges {
                     return @{
                         Success = $true
                         Message = "$FixName completed"
-                        Changes = @("$FixName: $changeCount file(s) updated")
+                        Changes = @("${FixName}: $changeCount file(s) updated")
                     }
                 }
                 elseif ($LASTEXITCODE -eq 0) {
                     return @{
                         Success = $true
-                        Message = "$FixName: no changes needed"
+                        Message = "${FixName}: no changes needed"
                         Changes = @()
                     }
                 }
@@ -148,7 +151,7 @@ function Invoke-Angular15BreakingChanges {
             catch {
                 return @{
                     Success = $false
-                    Message = "$FixName failed: $_"
+                    Message = "${FixName} failed: $_"
                     Changes = @()
                 }
             }
