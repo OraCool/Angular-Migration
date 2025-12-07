@@ -67,14 +67,15 @@ function Get-CompatibleVersions {
     Write-Success "Compatibility matrix loaded for Angular $TargetVersion"
 
     return @{
-        Angular      = $matrix.versions.$TargetVersion.angular
-        TypeScript   = $matrix.versions.$TargetVersion.typescript
-        RxJS         = $matrix.versions.$TargetVersion.rxjs
-        ZoneJs       = $matrix.versions.$TargetVersion.'zone.js'
-        Tslib        = $matrix.versions.$TargetVersion.tslib
-        Dependencies = $matrix.versions.$TargetVersion.dependencies
-        Removed      = $matrix.versions.$TargetVersion.removed
-        Notes        = $matrix.versions.$TargetVersion.notes
+        Angular         = $matrix.versions.$TargetVersion.angular
+        TypeScript      = $matrix.versions.$TargetVersion.typescript
+        RxJS            = $matrix.versions.$TargetVersion.rxjs
+        ZoneJs          = $matrix.versions.$TargetVersion.'zone.js'
+        Tslib           = $matrix.versions.$TargetVersion.tslib
+        Dependencies    = $matrix.versions.$TargetVersion.dependencies
+        DevDependencies = $matrix.versions.$TargetVersion.devDependencies
+        Removed         = $matrix.versions.$TargetVersion.removed
+        Notes           = $matrix.versions.$TargetVersion.notes
     }
 }
 
@@ -210,31 +211,8 @@ function Update-PackageJson {
         @{ Name = '@angular/compiler-cli'; Version = $versions.Angular.core; Type = 'devDependencies' }
     )
 
-    # Add ng-packagr if it exists (for library projects)
-    if ($packageJson.devDependencies.PSObject.Properties.Name -contains 'ng-packagr') {
-        $cliPackages += @{ Name = 'ng-packagr'; Version = $versions.Angular.core; Type = 'devDependencies' }
-    }
-
-    # Add common Angular ecosystem packages that have version-specific peer dependencies
-    $ecosystemPackages = @(
-        # Angular PWA
-        @{ Name = '@angular/pwa'; Version = $versions.Angular.core; Type = 'dependencies' },
-        # Angular Fire (Firebase)
-        @{ Name = '@angular/fire'; Version = $versions.Angular.core; Type = 'dependencies' },
-        # Angular ESLint
-        @{ Name = '@angular-eslint/builder'; Version = $versions.Angular.core; Type = 'devDependencies' },
-        @{ Name = '@angular-eslint/eslint-plugin'; Version = $versions.Angular.core; Type = 'devDependencies' },
-        @{ Name = '@angular-eslint/eslint-plugin-template'; Version = $versions.Angular.core; Type = 'devDependencies' },
-        @{ Name = '@angular-eslint/schematics'; Version = $versions.Angular.core; Type = 'devDependencies' },
-        @{ Name = '@angular-eslint/template-parser'; Version = $versions.Angular.core; Type = 'devDependencies' }
-    )
-
-    foreach ($pkg in $ecosystemPackages) {
-        $depType = $pkg.Type
-        if ($packageJson.$depType.PSObject.Properties.Name -contains $pkg.Name) {
-            $cliPackages += $pkg
-        }
-    }
+    # Note: ng-packagr and @angular-eslint/* packages are now handled
+    # by the devDependencies section from the compatibility matrix
 
     foreach ($pkg in $cliPackages) {
         $depType = $pkg.Type
@@ -322,6 +300,27 @@ function Update-PackageJson {
                     From    = $oldVersion
                     To      = $pkgVersion
                     Type    = 'dependencies'
+                }
+                Write-Host "  - $pkgName : $oldVersion → $pkgVersion"
+            }
+        }
+    }
+
+    # Update third-party devDependencies (from compatibility matrix)
+    if ($versions.DevDependencies) {
+        Write-InfoMessage "Updating ecosystem devDependencies..."
+        foreach ($property in $versions.DevDependencies.PSObject.Properties) {
+            $pkgName = $property.Name
+            $pkgVersion = $property.Value
+
+            if ($packageJson.devDependencies.PSObject.Properties.Name -contains $pkgName) {
+                $oldVersion = $packageJson.devDependencies.$pkgName
+                $packageJson.devDependencies.$pkgName = $pkgVersion
+                $changes += @{
+                    Package = $pkgName
+                    From    = $oldVersion
+                    To      = $pkgVersion
+                    Type    = 'devDependencies'
                 }
                 Write-Host "  - $pkgName : $oldVersion → $pkgVersion"
             }
