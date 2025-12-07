@@ -203,12 +203,38 @@ function Update-PackageJson {
     }
 
     # Update CLI packages
-    Write-InfoMessage "Updating Angular CLI..."
+    Write-InfoMessage "Updating Angular CLI and build tools..."
     $cliPackages = @(
         @{ Name = '@angular/cli'; Version = $versions.Angular.cli; Type = 'devDependencies' },
         @{ Name = '@angular-devkit/build-angular'; Version = $versions.Angular.cli; Type = 'devDependencies' },
         @{ Name = '@angular/compiler-cli'; Version = $versions.Angular.core; Type = 'devDependencies' }
     )
+
+    # Add ng-packagr if it exists (for library projects)
+    if ($packageJson.devDependencies.PSObject.Properties.Name -contains 'ng-packagr') {
+        $cliPackages += @{ Name = 'ng-packagr'; Version = $versions.Angular.core; Type = 'devDependencies' }
+    }
+
+    # Add common Angular ecosystem packages that have version-specific peer dependencies
+    $ecosystemPackages = @(
+        # Angular PWA
+        @{ Name = '@angular/pwa'; Version = $versions.Angular.core; Type = 'dependencies' },
+        # Angular Fire (Firebase)
+        @{ Name = '@angular/fire'; Version = $versions.Angular.core; Type = 'dependencies' },
+        # Angular ESLint
+        @{ Name = '@angular-eslint/builder'; Version = $versions.Angular.core; Type = 'devDependencies' },
+        @{ Name = '@angular-eslint/eslint-plugin'; Version = $versions.Angular.core; Type = 'devDependencies' },
+        @{ Name = '@angular-eslint/eslint-plugin-template'; Version = $versions.Angular.core; Type = 'devDependencies' },
+        @{ Name = '@angular-eslint/schematics'; Version = $versions.Angular.core; Type = 'devDependencies' },
+        @{ Name = '@angular-eslint/template-parser'; Version = $versions.Angular.core; Type = 'devDependencies' }
+    )
+
+    foreach ($pkg in $ecosystemPackages) {
+        $depType = $pkg.Type
+        if ($packageJson.$depType.PSObject.Properties.Name -contains $pkg.Name) {
+            $cliPackages += $pkg
+        }
+    }
 
     foreach ($pkg in $cliPackages) {
         $depType = $pkg.Type
@@ -444,6 +470,19 @@ function Install-Dependencies {
         $output = & npm $(if ($UseCI) { 'ci' } else { 'install' }) 2>&1
 
         $exitCode = $LASTEXITCODE
+        $outputString = $output -join "`n"
+
+        # Check for peer dependency conflicts (ERESOLVE error)
+        if ($exitCode -ne 0 -and $outputString -match 'ERESOLVE') {
+            Write-WarningMessage "Peer dependency conflict detected (ERESOLVE)"
+            Write-InfoMessage "Retrying with --legacy-peer-deps..."
+
+            # Retry with --legacy-peer-deps
+            $output = & npm $(if ($UseCI) { 'ci' } else { 'install' }) --legacy-peer-deps 2>&1
+            $exitCode = $LASTEXITCODE
+            $outputString = $output -join "`n"
+        }
+
         $duration = (Get-Date) - $startTime
 
         if ($exitCode -eq 0) {
@@ -458,7 +497,7 @@ function Install-Dependencies {
 
             return @{
                 Success  = $true
-                Output   = $output -join "`n"
+                Output   = $outputString
                 Duration = $duration
             }
         }
@@ -466,7 +505,7 @@ function Install-Dependencies {
             Write-WarningMessage "Package installation completed with warnings (exit code: $exitCode)"
             return @{
                 Success  = $false
-                Output   = $output -join "`n"
+                Output   = $outputString
                 Error    = "npm exited with code $exitCode"
                 Duration = $duration
             }
