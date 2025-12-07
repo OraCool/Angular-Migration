@@ -71,7 +71,48 @@ function Test-MigrationPrerequisites {
     }
 
     # Check for required files
-    $requiredFiles = @('package.json', 'angular.json', 'tsconfig.json')
+    # Detect if this is an NX workspace
+    $nxJsonPath = Join-Path $ProjectPath "nx.json"
+    $isNxWorkspace = Test-Path $nxJsonPath
+
+    if ($isNxWorkspace) {
+        Write-InfoMessage "  NX workspace detected"
+
+        # NX workspace required files
+        $requiredFiles = @('package.json')
+
+        # Check for workspace configuration (nx.json or workspace.json or angular.json)
+        $hasWorkspaceConfig = $false
+        $workspaceJsonPath = Join-Path $ProjectPath "workspace.json"
+        $angularJsonPath = Join-Path $ProjectPath "angular.json"
+
+        if (Test-Path $nxJsonPath) {
+            $hasWorkspaceConfig = $true
+        }
+        if (Test-Path $workspaceJsonPath) {
+            $hasWorkspaceConfig = $true
+        }
+        if (Test-Path $angularJsonPath) {
+            $hasWorkspaceConfig = $true
+        }
+
+        if (-not $hasWorkspaceConfig) {
+            $issues += "No workspace configuration file found (nx.json, workspace.json, or angular.json)"
+        }
+
+        # Check for tsconfig.base.json (NX uses this instead of tsconfig.json)
+        $tsconfigBasePath = Join-Path $ProjectPath "tsconfig.base.json"
+        $tsconfigPath = Join-Path $ProjectPath "tsconfig.json"
+
+        if (-not (Test-Path $tsconfigBasePath) -and -not (Test-Path $tsconfigPath)) {
+            $issues += "No TypeScript configuration found (tsconfig.base.json or tsconfig.json)"
+        }
+    }
+    else {
+        # Standard Angular workspace required files
+        $requiredFiles = @('package.json', 'angular.json', 'tsconfig.json')
+    }
+
     foreach ($file in $requiredFiles) {
         $filePath = Join-Path $ProjectPath $file
         if (-not (Test-Path $filePath)) {
