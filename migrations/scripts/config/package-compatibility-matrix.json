@@ -36,6 +36,9 @@
       "devDependencies": {
         "ng-packagr": "~14.2.0",
         "@angular/language-service": "~14.2.0",
+        "@angular-devkit/architect": "~14.2.0",
+        "@angular-devkit/core": "~14.2.0",
+        "@angular-devkit/schematics": "~14.2.0",
         "@angular-eslint/builder": "~14.0.0",
         "@angular-eslint/eslint-plugin": "~14.0.0",
         "@angular-eslint/eslint-plugin-template": "~14.0.0",
@@ -78,6 +81,9 @@
       "devDependencies": {
         "ng-packagr": "~15.2.0",
         "@angular/language-service": "~15.2.0",
+        "@angular-devkit/architect": "~15.2.0",
+        "@angular-devkit/core": "~15.2.0",
+        "@angular-devkit/schematics": "~15.2.0",
         "@angular-eslint/builder": "~15.0.0",
         "@angular-eslint/eslint-plugin": "~15.0.0",
         "@angular-eslint/eslint-plugin-template": "~15.0.0",
@@ -119,6 +125,9 @@
       "devDependencies": {
         "ng-packagr": "~16.2.0",
         "@angular/language-service": "~16.2.0",
+        "@angular-devkit/architect": "~16.2.0",
+        "@angular-devkit/core": "~16.2.0",
+        "@angular-devkit/schematics": "~16.2.0",
         "@angular-eslint/builder": "~16.0.0",
         "@angular-eslint/eslint-plugin": "~16.0.0",
         "@angular-eslint/eslint-plugin-template": "~16.0.0",
@@ -161,6 +170,9 @@
       "devDependencies": {
         "ng-packagr": "~17.3.0",
         "@angular/language-service": "~17.3.0",
+        "@angular-devkit/architect": "~17.3.0",
+        "@angular-devkit/core": "~17.3.0",
+        "@angular-devkit/schematics": "~17.3.0",
         "@angular-eslint/builder": "~17.0.0",
         "@angular-eslint/eslint-plugin": "~17.0.0",
         "@angular-eslint/eslint-plugin-template": "~17.0.0",
@@ -203,6 +215,9 @@
       "devDependencies": {
         "ng-packagr": "~18.2.0",
         "@angular/language-service": "~18.2.0",
+        "@angular-devkit/architect": "~18.2.0",
+        "@angular-devkit/core": "~18.2.0",
+        "@angular-devkit/schematics": "~18.2.0",
         "@angular-eslint/builder": "~18.0.0",
         "@angular-eslint/eslint-plugin": "~18.0.0",
         "@angular-eslint/eslint-plugin-template": "~18.0.0",
@@ -245,6 +260,9 @@
       "devDependencies": {
         "ng-packagr": "~19.0.0",
         "@angular/language-service": "~19.0.0",
+        "@angular-devkit/architect": "~19.0.0",
+        "@angular-devkit/core": "~19.0.0",
+        "@angular-devkit/schematics": "~19.0.0",
         "@angular-eslint/builder": "~19.0.0",
         "@angular-eslint/eslint-plugin": "~19.0.0",
         "@angular-eslint/eslint-plugin-template": "~19.0.0",
@@ -287,6 +305,9 @@
       "devDependencies": {
         "ng-packagr": "~20.0.0",
         "@angular/language-service": "~20.0.0",
+        "@angular-devkit/architect": "~20.0.0",
+        "@angular-devkit/core": "~20.0.0",
+        "@angular-devkit/schematics": "~20.0.0",
         "@angular-eslint/builder": "~20.0.0",
         "@angular-eslint/eslint-plugin": "~20.0.0",
         "@angular-eslint/eslint-plugin-template": "~20.0.0",
@@ -329,6 +350,9 @@
       "devDependencies": {
         "ng-packagr": "~21.0.0",
         "@angular/language-service": "~21.0.0",
+        "@angular-devkit/architect": "~21.0.0",
+        "@angular-devkit/core": "~21.0.0",
+        "@angular-devkit/schematics": "~21.0.0",
         "@angular-eslint/builder": "~21.0.0",
         "@angular-eslint/eslint-plugin": "~21.0.0",
         "@angular-eslint/eslint-plugin-template": "~21.0.0",
