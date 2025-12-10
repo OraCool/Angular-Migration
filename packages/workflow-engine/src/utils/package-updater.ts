@@ -9,7 +9,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { execSync, spawn } from 'child_process';
-import { detectPackageManager, cleanPackages } from './package-manager.js';
+import { detectPackageManager } from './package-manager.js';
 import type { ProgressCallback } from '../types/index.js';
 
 // ES modules compatibility: resolve __dirname
@@ -491,104 +491,43 @@ export async function updatePackages(
         });
       }
 
-      // Step 5: Save package.json to version control (optional git commit happens in workflow)
-      const gitMsg = '📝 package.json ready for clean install';
+      // Step 5: Provide manual installation instructions to the user
+      const gitMsg = '📝 package.json updated and ready for installation';
       console.log(gitMsg);
       logs.push(gitMsg);
 
-      // Step 6: Clean node_modules and lock files before install
-      const cleanMsg = '🧹 Cleaning node_modules and lock files...';
-      console.log(cleanMsg);
-      logs.push(cleanMsg);
+      // Detect package manager for instructions
+      const packageManager = detectPackageManager(projectPath);
+
+      // Provide manual installation instructions
+      const manualStepsMsg = `
+⚠️  MANUAL STEPS REQUIRED:
+
+The package.json has been updated with new package versions.
+You need to perform a clean installation manually:
+
+1️⃣  Remove old dependencies:
+   rm -rf node_modules package-lock.json
+
+2️⃣  Install new packages:
+   cd ${projectPath}
+   ${packageManager.installCommand}
+
+3️⃣  Verify installation:
+   ${packageManager.type} list --depth=0
+
+⚙️  These steps are NOT performed automatically to give you control over the installation process.
+`;
+
+      console.log(manualStepsMsg);
+      logs.push(manualStepsMsg);
 
       if (progressCallback) {
         progressCallback({
-          message: cleanMsg,
+          message: '⚠️  Manual installation required - see instructions above',
           type: 'info',
           timestamp: new Date().toISOString(),
         });
-      }
-
-      // Remove node_modules and lock files for clean install
-      const cleanResult = await cleanPackages({
-        projectPath,
-        removeNodeModules: true,
-        removeLockFile: true,
-        reinstall: false, // We'll install manually with progress tracking
-      });
-
-      if (!cleanResult.success) {
-        throw new Error(`Failed to clean packages: ${cleanResult.error}`);
-      }
-
-      const cleanedMsg = `✅ Cleaned: ${cleanResult.details?.nodeModulesRemoved ? 'node_modules' : ''} ${cleanResult.details?.lockFileRemoved ? 'lock file' : ''}`;
-      console.log(cleanedMsg);
-      logs.push(cleanedMsg);
-
-      if (progressCallback) {
-        progressCallback({
-          message: cleanedMsg,
-          type: 'success',
-          timestamp: new Date().toISOString(),
-        });
-      }
-
-      // Step 7: Detect package manager and install packages with streaming
-      const packageManager = detectPackageManager(projectPath);
-
-      // Log the exact directory where we'll run npm install
-      const dirMsg = `📁 Working directory: ${projectPath}`;
-      console.log(dirMsg);
-      logs.push(dirMsg);
-
-      const installMsg = `\n📦 Installing packages using ${packageManager.type}...`;
-      console.log(installMsg);
-      logs.push(installMsg);
-
-      const runMsg = `Running: ${packageManager.installCommand} in ${projectPath}`;
-      console.log(runMsg);
-      logs.push(runMsg);
-
-      // Define nodeModulesPath for before/after checks
-      const nodeModulesPath = path.join(projectPath, 'node_modules');
-
-      // Use streaming installation with progress updates
-      const installResult = await installPackagesWithProgress(
-        projectPath,
-        packageManager.installCommand,
-        progressCallback
-      );
-
-      // Check if node_modules exists after install
-      const afterExists = fs.existsSync(nodeModulesPath);
-      const afterMsg = `📦 node_modules after install: ${afterExists ? 'EXISTS' : 'DOES NOT EXIST'}`;
-      console.log(afterMsg);
-      logs.push(afterMsg);
-
-      if (installResult.success) {
-        const successMsg = '✅ Packages installed successfully';
-        console.log(successMsg);
-        logs.push(successMsg);
-
-        if (installResult.output) {
-          logs.push('--- INSTALL OUTPUT START ---');
-          logs.push(installResult.output);
-          logs.push('--- INSTALL OUTPUT END ---');
-        }
-      } else {
-        // Log warning but don't fail - the package.json is updated
-        const warnMsg = `⚠️  ${packageManager.installCommand} had warnings`;
-        console.warn(warnMsg);
-        logs.push(warnMsg);
-
-        if (installResult.error) {
-          console.warn('--- INSTALL ERROR START ---');
-          console.warn(installResult.error);
-          console.warn('--- INSTALL ERROR END ---');
-          logs.push('--- INSTALL ERROR START ---');
-          logs.push(installResult.error);
-          logs.push('--- INSTALL ERROR END ---');
-        }
       }
     } else {
       console.log('ℹ️  Dry run - no changes written to package.json');

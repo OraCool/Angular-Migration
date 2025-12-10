@@ -12,7 +12,7 @@
     "dev:acp": "npm run dev --workspace=packages/acp-agent",
     "dev:mcp": "npm run dev --workspace=packages/mcp-server",
     "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules",
-    "mcp:build": "cd packages/acp-agent && npm run build && cd ../workflow-engine && npm run build && cd ../mcp-server && npm run build"
+    "mcp:build": "npm run build --workspace=@angular-migration/workflow-engine && npm run build --workspace=@angular-migration/mcp-server"
   },
   "keywords": [
     "angular",

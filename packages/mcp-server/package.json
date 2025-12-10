@@ -9,7 +9,8 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && npm run copy:docs",
+    "copy:docs": "mkdir -p dist/migrations/docs/breaking-changes && cp ../../migrations/docs/*.md dist/migrations/docs/ && cp ../../migrations/docs/breaking-changes/*.md dist/migrations/docs/breaking-changes/",
     "start": "node dist/index.js",
     "test": "vitest"
   },

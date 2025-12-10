@@ -190,6 +190,10 @@ async function executeSubtaskInBackground(
         result = await executeRunMigrations(taskId, projectPath, version, taskStore);
         break;
 
+      case 'breaking_changes':
+        result = await executeApplyBreakingChanges(taskId, projectPath, version, taskStore);
+        break;
+
       case 'build_validate':
         if (!options.skipValidation) {
           result = await executeBuildValidate(taskId, projectPath, version, taskStore);
@@ -346,13 +350,55 @@ async function executeRunMigrations(
     }
   );
 
-  console.error(`[Task ${taskId}] Migrations completed`);
+  console.error(`[Task ${taskId}] Angular CLI migrations completed`);
 
   return {
     message: `Ran Angular ${version} migrations successfully`,
     stdout: stdout.substring(0, 1000),
     stderr: stderr.substring(0, 1000),
+    nextStep: {
+      tool: `migration_v${version}_apply_breaking_changes`,
+      description: 'Apply automated breaking changes fixes',
+      reason: 'Breaking changes fixes should be applied after migrations to update deprecated APIs',
+    },
   };
+}
+
+/**
+ * Execute: Apply breaking changes fixes
+ */
+async function executeApplyBreakingChanges(
+  taskId: string,
+  projectPath: string,
+  version: string,
+  taskStore: TaskStore
+): Promise<any> {
+  await taskStore.updateTaskStatus(taskId, 'working', `Applying Angular ${version} breaking changes fixes`);
+
+  console.error(`[Task ${taskId}] Applying breaking changes fixes for v${version}`);
+
+  try {
+    // Import breaking changes fixer dynamically
+    const { applyBreakingChangeFixes } = await import('@angular-migration/workflow-engine');
+
+    const result = await applyBreakingChangeFixes(projectPath, version);
+
+    const fixCount = result.changes.length;
+    console.error(`[Task ${taskId}] Breaking changes fixes applied: ${fixCount} fixes`);
+
+    return {
+      message: `Applied ${fixCount} breaking changes fixes for Angular ${version}`,
+      fixesApplied: fixCount,
+      changes: result.changes,
+      warnings: result.warnings,
+      errors: result.errors,
+      success: result.success,
+    };
+  } catch (error: any) {
+    // Some versions may not have breaking changes fixes implemented
+    console.error(`[Task ${taskId}] Breaking changes fixes failed: ${error.message}`);
+    throw new Error(`Failed to apply breaking changes fixes: ${error.message}`);
+  }
 }
 
 /**

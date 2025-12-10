@@ -11,9 +11,13 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { SessionManager } from '../session/manager.js';
 import { ANGULAR_MIGRATION_WORKFLOW } from '@angular-migration/workflow-engine';
-import { BREAKING_CHANGES_DB } from '../tools/packages.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
  * All available MCP resources
@@ -488,62 +492,40 @@ function getCompatibilityDoc() {
 }
 
 /**
+ * Version descriptions for breaking changes overview
+ */
+const VERSION_DESCRIPTIONS: Record<string, string> = {
+  '15': 'Material MDC Rewrite, Standalone Components',
+  '16': 'TypeScript 5.0+, Required Inputs',
+  '17': 'Built-in Control Flow, Deferrable Views, Legacy Material Removed',
+  '18': 'HttpClient Provider API, Signals Stable',
+  '19': 'TypeScript 5.9+, BrowserModule.withServerTransition Removed',
+  '20': 'Zoneless Change Detection, InjectFlags Removed',
+};
+
+/**
  * Generate breaking changes overview
  */
 function getBreakingChangesOverview() {
-  const versions = Object.keys(BREAKING_CHANGES_DB).sort();
-  const overview = {
-    description: 'Breaking changes across Angular versions 15-20',
-    versions: versions,
-    summary: {} as Record<string, { packages: number; totalChanges: number }>,
-  };
+  const versions = Object.keys(VERSION_DESCRIPTIONS).sort();
 
-  // Calculate summary for each version
+  const summary: Record<string, { description: string; hasContent: boolean }> = {};
+
   for (const version of versions) {
-    const versionChanges = BREAKING_CHANGES_DB[version];
-    const packages = Object.keys(versionChanges);
-    let totalChanges = 0;
-
-    for (const pkg of packages) {
-      totalChanges += versionChanges[pkg].length;
-    }
-
-    overview.summary[version] = {
-      packages: packages.length,
-      totalChanges,
+    summary[version] = {
+      description: VERSION_DESCRIPTIONS[version],
+      hasContent: true,
     };
   }
 
-  return overview;
-}
-
-/**
- * Generate breaking changes for a specific version
- */
-function getBreakingChangesForVersion(version: string) {
-  const versionChanges = BREAKING_CHANGES_DB[version];
-
-  if (!versionChanges) {
-    throw new Error(`No breaking changes data for Angular ${version}`);
-  }
-
-  const packages = Object.keys(versionChanges);
-  let totalChanges = 0;
-
-  for (const pkg of packages) {
-    totalChanges += versionChanges[pkg].length;
-  }
-
   return {
-    version,
-    packages: packages.length,
-    totalChanges,
-    changes: versionChanges,
+    description: 'Breaking changes across Angular versions 15-20',
+    versions,
+    summary,
     notes: [
-      `Angular ${version} introduced ${totalChanges} breaking changes across ${packages.length} packages`,
-      'Review each change carefully before upgrading',
-      'Test thoroughly after applying updates',
-      `Visit https://update.angular.io for interactive migration guide`,
+      'Use detect_breaking_changes() tool to scan your project',
+      'Each version includes detailed migration guidance from migrations/docs',
+      'Auto-fix and schematic availability marked',
     ],
   };
 }
@@ -552,7 +534,9 @@ function getBreakingChangesForVersion(version: string) {
  * Read documentation file from migrations/docs
  */
 async function readDocFile(filename: string): Promise<string> {
-  const docPath = path.join(process.cwd(), 'migrations', 'docs', filename);
+  // When running from dist/, the markdown files are in dist/migrations/docs/
+  // __dirname points to dist/resources/ so we need to go up one level
+  const docPath = path.join(__dirname, '..', 'migrations', 'docs', filename);
   if (!fs.existsSync(docPath)) {
     return `# Documentation Not Found\n\nFile: ${filename}\n\nThis documentation file is not yet available.`;
   }
@@ -581,57 +565,26 @@ async function getMigrationGuideMarkdown(version: string): Promise<string> {
 }
 
 /**
- * Get breaking changes markdown from PowerShell modules
+ * Get breaking changes markdown for a specific version
+ * Reads from focused breaking changes documents in migrations/docs/breaking-changes/
+ * These are separate from full migration guides to provide concise breaking changes info
  */
 async function getBreakingChangesMarkdown(version: string): Promise<string> {
-  const psPath = path.join(process.cwd(), 'migrations', 'scripts', 'modules', 'breaking-changes', `v${version}.psm1`);
+  const versionMap: Record<string, string> = {
+    '15': 'breaking-changes/v15.md',
+    '16': 'breaking-changes/v16.md',
+    '17': 'breaking-changes/v17.md',
+    '18': 'breaking-changes/v18.md',
+    '19': 'breaking-changes/v19.md',
+    '20': 'breaking-changes/v20.md',
+  };
 
-  if (!fs.existsSync(psPath)) {
-    return `# Breaking Changes for Angular ${version}\n\nNo breaking changes documentation available for this version.`;
+  const filename = versionMap[version];
+  if (!filename) {
+    return `# Breaking Changes Not Found\n\nNo breaking changes documentation available for Angular ${version}`;
   }
 
-  try {
-    const content = fs.readFileSync(psPath, 'utf-8');
-
-    // Extract comments and documentation from PowerShell module
-    const lines = content.split('\n');
-    let markdown = `# Angular ${version} Breaking Changes\n\n`;
-    markdown += `> Extracted from: \`migrations/scripts/modules/breaking-changes/v${version}.psm1\`\n\n`;
-
-    let currentSection = '';
-    let inComment = false;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-
-      // Extract comment blocks
-      if (trimmed.startsWith('#')) {
-        const commentText = trimmed.slice(1).trim();
-        if (commentText.length > 0) {
-          markdown += `${commentText}\n`;
-          inComment = true;
-        }
-      } else if (inComment && trimmed.length > 0) {
-        markdown += '\n';
-        inComment = false;
-      }
-
-      // Extract function names as section headers
-      if (trimmed.startsWith('function ')) {
-        const funcName = trimmed.match(/function\s+([A-Za-z0-9-_]+)/)?.[1];
-        if (funcName) {
-          currentSection = funcName.replace(/-/g, ' ');
-          markdown += `\n## ${currentSection}\n\n`;
-        }
-      }
-    }
-
-    markdown += `\n\n---\n\n*For more information, visit: [Angular Update Guide](https://update.angular.io)*\n`;
-
-    return markdown;
-  } catch (error) {
-    return `# Breaking Changes for Angular ${version}\n\nError reading documentation: ${error}`;
-  }
+  return readDocFile(filename);
 }
 
 /**

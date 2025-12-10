@@ -22,7 +22,6 @@ import {
 } from './workflow-stages.js';
 import { execSync, spawn } from 'child_process';
 import { getPlatform, getShellCommand } from '../utils/platform.js';
-import { cleanPackages } from '../utils/package-manager.js';
 import { updatePackages } from '../utils/package-updater.js';
 import { applyBreakingChangeFixes } from '../utils/breaking-changes.js';
 
@@ -205,36 +204,8 @@ export const ANGULAR_MIGRATION_WORKFLOW: WorkflowStep[] = [
         name: 'update-package-json-v15',
         toolName: 'update_packages',
         toolParams: { targetVersion: '15' },
-        description: 'Update ALL packages (Angular, Material, TypeScript, ag-grid, etc.) to v15 compatible versions',
-        timeout: 600000, // 10 minutes for npm install
-      },
-      {
-        type: 'command',
-        name: 'run-migrations-v15',
-        command: 'npx ng update @angular/core@15 --migrate-only --allow-dirty --force || true',
-        description: 'Run Angular 15 migration schematics (if any)',
-        timeout: 180000,
-      },
-      {
-        type: 'command',
-        name: 'run-material-migrations-v15',
-        command: 'npx ng update @angular/material@15 --migrate-only --allow-dirty --force || true',
-        description: 'Run Angular Material 15 migration schematics (chips API redesign: mat-chip-list → mat-chip-listbox)',
-        timeout: 180000,
-      },
-      {
-        type: 'auto-fix',
-        name: 'fix-polyfills-v15',
-        errorPattern: 'polyfills',
-        description: 'Auto-fix polyfills configuration if needed',
-        continueOnError: true,
-      },
-      {
-        type: 'auto-fix',
-        name: 'fix-test-specs-v15',
-        errorPattern: 'Expected.*arguments.*but got 0',
-        description: 'Auto-fix test spec constructor calls',
-        continueOnError: true,
+        description: '⚠️ Update package.json to Angular 15 - MANUAL INSTALLATION REQUIRED AFTER THIS STEP',
+        timeout: 60000,
       },
     ],
     rollbackActions: [
@@ -1375,21 +1346,12 @@ ${currentStep.rollbackActions ? '⚠️ **Rollback available** if this step fail
     const outputs: string[] = [];
 
     try {
-      // Clean packages before version upgrade steps (if it's an upgrade step)
+      // Inform user about manual package cleaning requirement (if it's an upgrade step)
       if (step.id.startsWith('upgrade-v') && !options.skipPackageClean) {
-        outputs.push('🧹 Cleaning packages before upgrade...');
-        const cleanResult = await cleanPackages({
-          projectPath: this.context.projectPath,
-          removeNodeModules: true,
-          removeLockFile: true,
-          reinstall: false, // Don't reinstall yet - updatePackages will do that
-        });
-
-        if (cleanResult.success) {
-          outputs.push('✅ Packages cleaned successfully');
-        } else {
-          outputs.push(`⚠️  Package clean warning: ${cleanResult.error}`);
-        }
+        outputs.push(
+          '⚠️  Package cleaning required - this will be handled in manual installation steps',
+          '📝 The package.json will be updated, and you will receive manual installation instructions'
+        );
       }
 
       // Get already completed actions for this step

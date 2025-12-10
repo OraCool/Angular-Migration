@@ -43,101 +43,138 @@ interface BreakingChangePattern {
 
 /**
  * Angular 15 Breaking Changes Patterns
- * Updated based on migrations/scripts/modules/breaking-changes/v15.psm1
+ * Based on: migrations/scripts/modules/breaking-changes/v15.psm1
+ * Official docs: https://v15.material.angular.dev/guide/mdc-migration
+ * Key changes: Material MDC rewrite, TypeScript ES2022, Router config updates
  */
 const V15_BREAKING_CHANGES: BreakingChangePattern[] = [
-  // CRITICAL: TypeScript target configuration
+  // ============================================================================
+  // CRITICAL: TypeScript Configuration
+  // ============================================================================
   {
     id: 'v15-typescript-target-es2022',
     category: BREAKING_CHANGE_CATEGORY.CONFIG_CHANGES,
     severity: SEVERITY.CRITICAL,
-    description: 'TypeScript target should be ES2022 (not ES2020)',
-    pattern: /"target"\s*:\s*"ES2020"/,
+    description: 'TypeScript target must be ES2022 (Angular 15 requirement, was ES2020 in v14)',
+    pattern: /"target"\s*:\s*"(ES2015|ES2016|ES2017|ES2018|ES2019|ES2020)"/,
     autoFix: true,
     schematic: false,
     migrationGuide: getBreakingChangesUri('15') + '#typescript-target',
     replacement: '"target": "ES2022"',
   },
 
-  // CRITICAL: Router relativeLinkResolution removed
+  // ============================================================================
+  // CRITICAL: Router Configuration Breaking Changes
+  // ============================================================================
   {
     id: 'v15-router-relative-link-resolution',
     category: BREAKING_CHANGE_CATEGORY.REMOVED_FEATURE,
     severity: SEVERITY.CRITICAL,
-    description: 'Router relativeLinkResolution property removed',
+    description: 'Router: relativeLinkResolution property removed from RouterModule config',
     pattern: /relativeLinkResolution\s*:/,
-    contextPattern: /RouterModule\.forRoot/,
+    contextPattern: /RouterModule\.forRoot|RouterModule\.forChild/,
     autoFix: true,
     schematic: false,
     migrationGuide: getBreakingChangesUri('15') + '#router-config',
   },
 
-  // CRITICAL: Material Chips API changes (3 migration paths)
+  // ============================================================================
+  // CRITICAL: Angular Material MDC Migration (Biggest v15 Change)
+  // ============================================================================
+
+  // Material Chips - Complete API Rewrite (3 new variants)
   {
-    id: 'v15-material-chips-grid-input',
+    id: 'v15-material-chips-legacy-mat-chip-list',
     category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
     severity: SEVERITY.CRITICAL,
-    description: 'Material Chips: Form input chips - use mat-chip-grid + mat-chip-row (with matChipInputFor)',
-    pattern: /mat-chip-list|MatChipList/,
-    contextPattern: /matChipInputFor/,
-    autoFix: true,
+    description: 'Material Chips: mat-chip-list deprecated - requires MDC migration to mat-chip-listbox, mat-chip-grid, or mat-chip-set',
+    pattern: /<mat-chip-list|MatChipList/,
+    autoFix: false,
     schematic: true,
-    migrationGuide: getBreakingChangesUri('15') + '#material-chips-grid',
+    migrationGuide: getBreakingChangesUri('15') + '#material-chips-mdc',
   },
 
   {
-    id: 'v15-material-chips-selectable',
+    id: 'v15-material-chips-mat-chip-input-event',
     category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
     severity: SEVERITY.CRITICAL,
-    description: 'Material Chips: Selectable chips - use mat-chip-listbox + mat-chip-option (with [selected])',
-    pattern: /mat-chip-list|MatChipList/,
-    contextPattern: /\[selected\]/,
-    autoFix: true,
+    description: 'Material Chips: MatChipInputEvent deprecated - use MatChipInputFor with mat-chip-grid',
+    pattern: /MatChipInputEvent/,
+    autoFix: false,
     schematic: true,
-    migrationGuide: getBreakingChangesUri('15') + '#material-chips-selectable',
+    migrationGuide: getBreakingChangesUri('15') + '#material-chips-input-event',
   },
 
   {
-    id: 'v15-material-chips-display',
-    category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
-    severity: SEVERITY.CRITICAL,
-    description: 'Material Chips: Display-only chips - use mat-chip-set ([selected] → [highlighted])',
-    pattern: /mat-chip-list|MatChipList/,
-    autoFix: true,
-    schematic: true,
-    migrationGuide: getBreakingChangesUri('15') + '#material-chips-display',
-  },
-
-  {
-    id: 'v15-material-chips-selected-property',
-    category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
+    id: 'v15-material-chips-selection-change',
+    category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
     severity: SEVERITY.HIGH,
-    description: 'Material Chips: [selected] property changed - depends on chip type (grid/listbox/set)',
-    pattern: /\[selected\]/,
+    description: 'Material Chips: (selectionChange) event changed - use (selectionChange) on mat-chip-listbox or mat-chip-grid',
+    pattern: /\(selectionChange\)\s*=/,
     contextPattern: /mat-chip/,
     autoFix: false,
     schematic: true,
-    migrationGuide: getBreakingChangesUri('15') + '#material-chips',
+    migrationGuide: getBreakingChangesUri('15') + '#material-chips-events',
   },
 
-  // HIGH: Material Form Field
+  // Material Legacy Imports (After migration, legacy components deprecated in v17)
+  {
+    id: 'v15-material-legacy-imports',
+    category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
+    severity: SEVERITY.HIGH,
+    description: 'Material: Legacy imports (@angular/material/legacy-*) auto-generated by migration - will be removed in v17',
+    pattern: /from\s+['"]@angular\/material\/legacy-/,
+    autoFix: false,
+    schematic: true,
+    migrationGuide: getBreakingChangesUri('15') + '#material-legacy-imports',
+  },
+
+  // Material Form Field
   {
     id: 'v15-material-form-field-outline-gap',
     category: BREAKING_CHANGE_CATEGORY.REMOVED_FEATURE,
     severity: SEVERITY.HIGH,
-    description: 'Material Form Field: updateOutlineGap() method removed',
+    description: 'Material Form Field: updateOutlineGap() method removed (handled automatically by MDC)',
     pattern: /\.updateOutlineGap\s*\(/,
     autoFix: true,
     schematic: false,
     migrationGuide: getBreakingChangesUri('15') + '#material-form-field',
   },
 
-  // MEDIUM: ag-Grid imports
+  // Material Slider - Complete API Rewrite
+  {
+    id: 'v15-material-slider-api',
+    category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
+    severity: SEVERITY.CRITICAL,
+    description: 'Material Slider: Complete API change - input/output/thumbLabel changed, range slider added (MANUAL MIGRATION)',
+    pattern: /<mat-slider|MatSlider/,
+    autoFix: false,
+    schematic: true,
+    migrationGuide: getBreakingChangesUri('15') + '#material-slider',
+  },
+
+  // Material Theming - SCSS Module System
+  {
+    id: 'v15-material-theming-scss-modules',
+    category: BREAKING_CHANGE_CATEGORY.CONFIG_CHANGES,
+    severity: SEVERITY.HIGH,
+    description: 'Material Theming: @import deprecated - migrate to @use and @angular/material namespace (mat.* functions)',
+    pattern: /@import\s+['"]~?@angular\/material\/theming['"]|mat-palette\(|mat-light-theme\(|mat-dark-theme\(|angular-material-theme\(/,
+    autoFix: false,
+    schematic: true,
+    migrationGuide: getBreakingChangesUri('15') + '#material-theming',
+  },
+
+  // ============================================================================
+  // HIGH: Third-Party Library Changes
+  // ============================================================================
+
+  // ag-Grid imports
   {
     id: 'v15-aggrid-imports',
     category: BREAKING_CHANGE_CATEGORY.IMPORT_CHANGES,
     severity: SEVERITY.MEDIUM,
-    description: 'ag-Grid: stylesheet import paths changed',
+    description: 'ag-Grid: Import paths changed - remove ~ prefix from stylesheet imports',
     pattern: /@import\s+['"]~ag-grid/,
     autoFix: true,
     schematic: false,
@@ -148,7 +185,7 @@ const V15_BREAKING_CHANGES: BreakingChangePattern[] = [
     id: 'v15-aggrid-api-changes',
     category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
     severity: SEVERITY.MEDIUM,
-    description: 'ag-Grid: detailNode and IRowNode API changes require manual review',
+    description: 'ag-Grid: detailNode and IRowNode API changes (check ag-Grid migration guide)',
     pattern: /detailNode|IRowNode/,
     contextPattern: /ag-grid/,
     autoFix: false,
@@ -156,12 +193,12 @@ const V15_BREAKING_CHANGES: BreakingChangePattern[] = [
     migrationGuide: getBreakingChangesUri('15') + '#aggrid-api',
   },
 
-  // MEDIUM MANUAL: Highcharts
+  // Highcharts
   {
     id: 'v15-highcharts-api-changes',
     category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
     severity: SEVERITY.MEDIUM,
-    description: 'Highcharts: Type definitions changed (zoomType property location changed)',
+    description: 'Highcharts: Type definitions changed - zoomType moved from chart to Chart.options (TypeScript)',
     pattern: /zoomType|ChartOptions/,
     contextPattern: /highcharts|Highcharts/,
     autoFix: false,
@@ -169,36 +206,28 @@ const V15_BREAKING_CHANGES: BreakingChangePattern[] = [
     migrationGuide: getBreakingChangesUri('15') + '#highcharts-api',
   },
 
-  // CRITICAL MANUAL: Material Slider
-  {
-    id: 'v15-material-slider-api',
-    category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
-    severity: SEVERITY.CRITICAL,
-    description: 'Material Slider: API completely changed (MANUAL MIGRATION REQUIRED)',
-    pattern: /mat-slider|MatSlider/,
-    autoFix: false,
-    schematic: true,
-    migrationGuide: getBreakingChangesUri('15') + '#material-slider',
-  },
+  // ============================================================================
+  // HIGH: RxJS and Forms Changes
+  // ============================================================================
 
-  // HIGH MANUAL: RxJS subscribe syntax
+  // RxJS subscribe syntax
   {
     id: 'v15-rxjs-subscribe-syntax',
     category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
     severity: SEVERITY.HIGH,
-    description: 'RxJS: Old subscribe() syntax deprecated (use observer object)',
+    description: 'RxJS: Old .subscribe(next, error, complete) syntax deprecated - use observer object { next, error, complete }',
     pattern: /\.subscribe\s*\(\s*\w+\s*=>/,
     autoFix: false,
     schematic: false,
     migrationGuide: getBreakingChangesUri('15') + '#rxjs-subscribe',
   },
 
-  // HIGH MANUAL: ControlValueAccessor
+  // ControlValueAccessor
   {
     id: 'v15-control-value-accessor',
     category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
     severity: SEVERITY.HIGH,
-    description: 'ControlValueAccessor: setDisabledState() method now required',
+    description: 'Forms: ControlValueAccessor.setDisabledState() method now required (was optional)',
     pattern: /implements\s+ControlValueAccessor/,
     contextPattern: /setDisabledState/,
     autoFix: false,
@@ -206,25 +235,17 @@ const V15_BREAKING_CHANGES: BreakingChangePattern[] = [
     migrationGuide: getBreakingChangesUri('15') + '#control-value-accessor',
   },
 
-  // HIGH MANUAL: Material Theming
-  {
-    id: 'v15-material-theming',
-    category: BREAKING_CHANGE_CATEGORY.CONFIG_CHANGES,
-    severity: SEVERITY.HIGH,
-    description: 'Material Theming: Theme configuration format changed (@import → @use, mat-palette → mat.define-palette)',
-    pattern: /@import\s+['"]~?@angular\/material\/theming['"]|mat-palette\(|mat-light-theme\(|mat-dark-theme\(|angular-material-theme\(/,
-    autoFix: false,
-    schematic: true,
-    migrationGuide: getBreakingChangesUri('15') + '#material-theming',
-  },
+  // ============================================================================
+  // RECOMMENDATIONS (not breaking, but best practices)
+  // ============================================================================
 
-  // Router guards recommendation
+  // Functional Router Guards
   {
-    id: 'v15-router-guards-boolean',
+    id: 'v15-router-guards-functional',
     category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
-    severity: SEVERITY.HIGH,
-    description: 'Router guards must return Observable<boolean | UrlTree> instead of boolean',
-    pattern: /canActivate.*:\s*boolean/,
+    severity: SEVERITY.MEDIUM,
+    description: 'Router: Consider migrating to functional guards (canActivateFn) - class-based guards still work but functional is recommended',
+    pattern: /class\s+\w+\s+implements\s+(CanActivate|CanActivateChild|CanDeactivate|CanLoad)/,
     autoFix: false,
     schematic: false,
     migrationGuide: getBreakingChangesUri('15') + '#router-guards',
@@ -286,39 +307,52 @@ const V17_BREAKING_CHANGES: BreakingChangePattern[] = [
 
 /**
  * Angular 18 Breaking Changes Patterns
+ * Based on: migrations/scripts/modules/breaking-changes/v18.psm1
+ * Official docs: https://angular.dev/api/common/http/HttpClientModule (deprecated)
+ * Key changes: HttpClient* modules deprecated, StateKey imports moved, SSR changes
  */
 const V18_BREAKING_CHANGES: BreakingChangePattern[] = [
-  // CRITICAL: HttpClientModule and related modules deprecated
+  // ============================================================================
+  // CRITICAL: HttpClient Module System Deprecation (Major v18 Change)
+  // ============================================================================
+
+  // HttpClientModule - The main deprecation
   {
     id: 'v18-http-client-module',
     category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
     severity: SEVERITY.CRITICAL,
-    description: 'HttpClientModule deprecated - use provideHttpClient()',
+    description: 'HttpClientModule deprecated - replace with provideHttpClient() in providers array (use withInterceptorsFromDi() for existing interceptors)',
     pattern: /HttpClientModule/,
     autoFix: false,
     schematic: true,
     migrationGuide: getBreakingChangesUri('18') + '#http-client-module',
   },
+
+  // HttpClientTestingModule
   {
     id: 'v18-http-client-testing-module',
     category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
     severity: SEVERITY.CRITICAL,
-    description: 'HttpClientTestingModule deprecated - use provideHttpClientTesting()',
+    description: 'HttpClientTestingModule deprecated - replace with provideHttpClientTesting() in test providers',
     pattern: /HttpClientTestingModule/,
     autoFix: false,
     schematic: true,
     migrationGuide: getBreakingChangesUri('18') + '#http-client-testing',
   },
+
+  // HttpClientXsrfModule
   {
     id: 'v18-http-client-xsrf-module',
     category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
     severity: SEVERITY.MEDIUM,
-    description: 'HttpClientXsrfModule deprecated - use provideHttpClient(withXsrfConfiguration())',
+    description: 'HttpClientXsrfModule deprecated - use provideHttpClient(withXsrfConfiguration({ cookieName, headerName }))',
     pattern: /HttpClientXsrfModule/,
     autoFix: false,
     schematic: true,
     migrationGuide: getBreakingChangesUri('18') + '#http-client-xsrf',
   },
+
+  // HttpClientJsonpModule
   {
     id: 'v18-http-client-jsonp-module',
     category: BREAKING_CHANGE_CATEGORY.DEPRECATED_API,
@@ -330,12 +364,27 @@ const V18_BREAKING_CHANGES: BreakingChangePattern[] = [
     migrationGuide: getBreakingChangesUri('18') + '#http-client-jsonp',
   },
 
-  // MEDIUM: Import changes
+  // HTTP_INTERCEPTORS token usage
+  {
+    id: 'v18-http-interceptors-token',
+    category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
+    severity: SEVERITY.HIGH,
+    description: 'HTTP_INTERCEPTORS with provideHttpClient() - add withInterceptorsFromDi() to support class-based interceptors',
+    pattern: /HTTP_INTERCEPTORS/,
+    autoFix: false,
+    schematic: false,
+    migrationGuide: getBreakingChangesUri('18') + '#http-interceptors',
+  },
+
+  // ============================================================================
+  // MEDIUM: StateKey/TransferState Import Changes (SSR)
+  // ============================================================================
+
   {
     id: 'v18-state-key-imports',
     category: BREAKING_CHANGE_CATEGORY.IMPORT_CHANGES,
     severity: SEVERITY.MEDIUM,
-    description: 'StateKey/TransferState moved to @angular/core',
+    description: 'StateKey/TransferState/makeStateKey moved from @angular/platform-browser to @angular/core',
     pattern: /from\s+['"]@angular\/platform-browser['"]/,
     contextPattern: /(StateKey|TransferState|makeStateKey)/,
     autoFix: true,
@@ -344,51 +393,102 @@ const V18_BREAKING_CHANGES: BreakingChangePattern[] = [
     replacement: "from '@angular/core'",
   },
 
-  // HIGH: Removed features
+  // ============================================================================
+  // HIGH: Server-Side Rendering (SSR) Breaking Changes
+  // ============================================================================
+
   {
     id: 'v18-server-transfer-state-module',
     category: BREAKING_CHANGE_CATEGORY.REMOVED_FEATURE,
     severity: SEVERITY.HIGH,
-    description: 'ServerTransferStateModule removed',
+    description: 'ServerTransferStateModule removed - TransferState now provided automatically by default',
     pattern: /ServerTransferStateModule/,
     autoFix: false,
     schematic: false,
     migrationGuide: getBreakingChangesUri('18') + '#server-transfer-state',
   },
 
-  // MEDIUM: Removed platform APIs
-  {
-    id: 'v18-platform-worker-apis',
-    category: BREAKING_CHANGE_CATEGORY.REMOVED_FEATURE,
-    severity: SEVERITY.MEDIUM,
-    description: 'Platform Worker APIs removed (WebWorker platform removed)',
-    pattern: /isPlatformWorkerUi|isPlatformWorkerApp/,
-    autoFix: false,
-    schematic: false,
-    migrationGuide: getBreakingChangesUri('18') + '#platform-worker',
-  },
   {
     id: 'v18-platform-dynamic-server',
     category: BREAKING_CHANGE_CATEGORY.REMOVED_FEATURE,
     severity: SEVERITY.MEDIUM,
-    description: 'platformDynamicServer removed - use renderApplication',
+    description: 'platformDynamicServer() removed - use renderApplication() or renderModule() instead',
     pattern: /platformDynamicServer/,
     autoFix: false,
     schematic: false,
     migrationGuide: getBreakingChangesUri('18') + '#platform-dynamic-server',
   },
 
-  // HIGH: Router redirects must be absolute
+  // ============================================================================
+  // MEDIUM: WebWorker Platform Removed
+  // ============================================================================
+
+  {
+    id: 'v18-platform-worker-apis',
+    category: BREAKING_CHANGE_CATEGORY.REMOVED_FEATURE,
+    severity: SEVERITY.MEDIUM,
+    description: 'WebWorker platform removed - isPlatformWorkerUi() and isPlatformWorkerApp() no longer available',
+    pattern: /isPlatformWorkerUi|isPlatformWorkerApp|@angular\/platform-webworker/,
+    autoFix: false,
+    schematic: false,
+    migrationGuide: getBreakingChangesUri('18') + '#platform-worker',
+  },
+
+  // ============================================================================
+  // HIGH: Router Configuration Changes
+  // ============================================================================
+
   {
     id: 'v18-route-redirects-absolute',
     category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
     severity: SEVERITY.HIGH,
-    description: 'Route redirects must be absolute (start with /)',
+    description: 'Router: redirectTo values must be absolute paths (start with /) - relative paths no longer supported',
     pattern: /redirectTo\s*:\s*['"][^\/]/,
     contextPattern: /path\s*:/,
     autoFix: false,
     schematic: true,
     migrationGuide: getBreakingChangesUri('18') + '#route-redirects',
+  },
+
+  // ============================================================================
+  // MEDIUM: OnPush Change Detection Behavior
+  // ============================================================================
+
+  {
+    id: 'v18-onpush-root-views',
+    category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
+    severity: SEVERITY.MEDIUM,
+    description: 'OnPush components: Root views marked dirty on initialization - may see extra change detection cycles',
+    pattern: /changeDetection\s*:\s*ChangeDetectionStrategy\.OnPush/,
+    autoFix: false,
+    schematic: false,
+    migrationGuide: getBreakingChangesUri('18') + '#onpush-behavior',
+  },
+
+  // ============================================================================
+  // LOW: New Features (Not Breaking, but Important)
+  // ============================================================================
+
+  {
+    id: 'v18-signals-stable',
+    category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
+    severity: SEVERITY.LOW,
+    description: 'Angular Signals now stable - consider migrating from RxJS for state management',
+    pattern: /new\s+BehaviorSubject|new\s+Subject/,
+    autoFix: false,
+    schematic: false,
+    migrationGuide: getBreakingChangesUri('18') + '#signals-stable',
+  },
+
+  {
+    id: 'v18-zoneless-experimental',
+    category: BREAKING_CHANGE_CATEGORY.BEHAVIOR_CHANGES,
+    severity: SEVERITY.LOW,
+    description: 'Experimental zoneless change detection available - use provideExperimentalZonelessChangeDetection()',
+    pattern: /zone\.js|NgZone/,
+    autoFix: false,
+    schematic: false,
+    migrationGuide: getBreakingChangesUri('18') + '#zoneless',
   },
 ];
 
