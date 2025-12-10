@@ -179,6 +179,12 @@ function getResources(sessionManager: SessionManager): Resource[] {
       description: 'Optional migration to new control flow syntax',
       mimeType: 'text/markdown',
     },
+    {
+      uri: 'guide://material-mdc-migration',
+      name: 'Material MDC Migration',
+      description: 'Angular Material MDC migration guide for v15-v17',
+      mimeType: 'text/markdown',
+    },
   ];
 
   // Dynamic session resources
@@ -250,6 +256,8 @@ export function registerResources(
         content = await readDocFile('optional-signals-migration.md');
       } else if (uri === 'guide://control-flow-migration') {
         content = await readDocFile('optional-control-flow-migration.md');
+      } else if (uri === 'guide://material-mdc-migration') {
+        content = await readDocFile('material-mdc-migration-guide.md');
       } else if (uri.startsWith('migration://sessions/')) {
         const match = uri.match(/migration:\/\/sessions\/([^/]+)\/(state|plan)/);
         if (!match) {

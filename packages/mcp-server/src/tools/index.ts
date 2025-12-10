@@ -343,6 +343,32 @@ session_create({ "projectPath": "C:\\\\Users\\\\jane\\\\myapp" })`,
     }
   );
 
+  mcpServer.registerTool(
+    'validate_material_mdc_readiness',
+    {
+      title: 'Validate Material MDC Migration Readiness',
+      description: `Validate project readiness for Angular Material v15 MDC (Material Design Components) migration.
+
+Performs comprehensive pre-flight checks for Material breaking changes:
+- CRITICAL: Detects floatLabel="never" (blocks MDC migration)
+- CRITICAL: Detects appearance="standard" (blocks MDC migration)
+- WARNING: Detects mat-tab-nav-bar without [tabPanel] binding
+- WARNING: Detects Material Slider usage (requires manual migration)
+- INFO: Detects legacy Material CSS classes (mat-* → mat-mdc-*)
+
+Returns detailed report with affected files, recommended actions, and next steps.
+
+Use this BEFORE upgrading to Angular 15 to identify blocking issues.`,
+      inputSchema: {
+        projectPath: z.string().describe('Path to Angular project root directory'),
+      },
+    },
+    async ({ projectPath }) => {
+      const result = await validationTools.handleValidationTool('validate_material_mdc_readiness', { projectPath }, sessionManager, progressCallback);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
   // ========================================
   // PACKAGE MANAGEMENT TOOLS
   // ========================================

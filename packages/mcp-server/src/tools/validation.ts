@@ -26,6 +26,8 @@ export async function handleValidationTool(
       return await validateNodeVersion(args);
     case 'validate_dependencies':
       return await validateDependencies(args);
+    case 'validate_material_mdc_readiness':
+      return await validateMaterialMdcReadiness(args);
     default:
       return {
         success: false,
@@ -252,6 +254,254 @@ async function validateDependencies(
         errors.length === 0
           ? 'Dependencies validation passed'
           : 'Dependencies validation found issues',
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Validate project readiness for Angular Material v15 MDC migration
+ * Checks for deprecated Material properties that block MDC migration
+ */
+async function validateMaterialMdcReadiness(
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  const projectPath = args.projectPath as string;
+
+  if (!projectPath) {
+    return {
+      success: false,
+      error: 'projectPath is required',
+    };
+  }
+
+  try {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const suggestions: string[] = [];
+    const findings: Record<string, string[]> = {};
+
+    const srcPath = path.join(projectPath, 'src');
+
+    // Check if src directory exists
+    try {
+      await fs.access(srcPath);
+    } catch {
+      return {
+        success: false,
+        error: `Source directory not found: ${srcPath}`,
+      };
+    }
+
+    // Helper function to find files recursively
+    async function findFiles(
+      dir: string,
+      pattern: RegExp,
+      extensions: string[]
+    ): Promise<Array<{ file: string; matches: string[] }>> {
+      const results: Array<{ file: string; matches: string[] }> = [];
+
+      async function walk(currentDir: string): Promise<void> {
+        const entries = await fs.readdir(currentDir, { withFileTypes: true });
+
+        for (const entry of entries) {
+          const fullPath = path.join(currentDir, entry.name);
+
+          if (entry.isDirectory()) {
+            if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
+              await walk(fullPath);
+            }
+          } else if (entry.isFile() && extensions.some(ext => entry.name.endsWith(ext))) {
+            const content = await fs.readFile(fullPath, 'utf-8');
+            const matches = content.match(pattern);
+
+            if (matches && matches.length > 0) {
+              results.push({
+                file: path.relative(projectPath, fullPath),
+                matches: [...new Set(matches)], // Unique matches
+              });
+            }
+          }
+        }
+      }
+
+      await walk(dir);
+      return results;
+    }
+
+    // 1. Check for floatLabel="never" (CRITICAL - blocks MDC migration)
+    const floatLabelFiles = await findFiles(
+      srcPath,
+      /floatLabel\s*=\s*["']never["']/g,
+      ['.html']
+    );
+
+    if (floatLabelFiles.length > 0) {
+      errors.push(
+        `Found ${floatLabelFiles.length} file(s) using floatLabel="never" (BLOCKS MDC migration)`
+      );
+      findings['floatLabel="never"'] = floatLabelFiles.map(f => f.file);
+      suggestions.push(
+        'Replace floatLabel="never" with floatLabel="auto" before v15 upgrade'
+      );
+    }
+
+    // 2. Check for appearance="standard" (CRITICAL - blocks MDC migration)
+    const appearanceFiles = await findFiles(
+      srcPath,
+      /appearance\s*=\s*["']standard["']/g,
+      ['.html']
+    );
+
+    if (appearanceFiles.length > 0) {
+      errors.push(
+        `Found ${appearanceFiles.length} file(s) using appearance="standard" (BLOCKS MDC migration)`
+      );
+      findings['appearance="standard"'] = appearanceFiles.map(f => f.file);
+      suggestions.push(
+        'Replace appearance="standard" with appearance="outline" or "fill" before v15 upgrade'
+      );
+    }
+
+    // 3. Check for mat-tab-nav-bar without [tabPanel] (WARNING)
+    const tabNavBarFiles = await findFiles(
+      srcPath,
+      /<mat-tab-nav-bar(?![^>]*\[tabPanel\])/g,
+      ['.html']
+    );
+
+    if (tabNavBarFiles.length > 0) {
+      warnings.push(
+        `Found ${tabNavBarFiles.length} file(s) using mat-tab-nav-bar without [tabPanel] binding`
+      );
+      findings['mat-tab-nav-bar missing [tabPanel]'] = tabNavBarFiles.map(f => f.file);
+      suggestions.push(
+        'Add [tabPanel] binding to mat-tab-nav-bar and wrap content in <mat-tab-nav-panel>'
+      );
+    }
+
+    // 4. Check for Material Slider usage (MANUAL MIGRATION REQUIRED)
+    const sliderFiles = await findFiles(
+      srcPath,
+      /<mat-slider/g,
+      ['.html']
+    );
+
+    if (sliderFiles.length > 0) {
+      warnings.push(
+        `Found ${sliderFiles.length} file(s) using mat-slider (MANUAL migration required)`
+      );
+      findings['mat-slider'] = sliderFiles.map(f => f.file);
+      suggestions.push(
+        'Material Slider was completely rewritten in v15 - manual migration required after upgrade'
+      );
+    }
+
+    // 5. Check for legacy Material CSS classes
+    const legacyCssFiles = await findFiles(
+      srcPath,
+      /\.(mat-form-field-flex|mat-form-field-outline|mat-form-field-infix)\b/g,
+      ['.scss', '.css']
+    );
+
+    if (legacyCssFiles.length > 0) {
+      warnings.push(
+        `Found ${legacyCssFiles.length} file(s) using legacy Material CSS classes`
+      );
+      findings['Legacy CSS classes'] = legacyCssFiles.map(f => f.file);
+      suggestions.push(
+        'Update CSS classes: mat-form-field-* → mat-mdc-form-field-*'
+      );
+    }
+
+    // 6. Check if Angular Material is installed
+    const packageJsonPath = path.join(projectPath, 'package.json');
+    try {
+      const packageJsonContent = await fs.readFile(packageJsonPath, 'utf-8');
+      const packageJson = JSON.parse(packageJsonContent);
+      const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
+
+      if (!deps['@angular/material']) {
+        suggestions.push('Angular Material not detected in this project');
+      } else {
+        const materialVersion = deps['@angular/material'];
+        suggestions.push(`Current Angular Material version: ${materialVersion}`);
+      }
+    } catch {
+      warnings.push('Could not read package.json');
+    }
+
+    const validation: ValidationInfo = {
+      valid: errors.length === 0,
+      errors,
+      warnings,
+      suggestions,
+    };
+
+    // Build detailed report
+    let detailedReport = '# Material MDC Readiness Report\n\n';
+
+    if (errors.length === 0 && warnings.length === 0) {
+      detailedReport += '✅ **No blocking issues found!** Project appears ready for Material v15 MDC migration.\n\n';
+    } else {
+      detailedReport += '## Summary\n\n';
+      if (errors.length > 0) {
+        detailedReport += `- **${errors.length} CRITICAL issue(s)** that will block MDC migration\n`;
+      }
+      if (warnings.length > 0) {
+        detailedReport += `- **${warnings.length} warning(s)** that require attention\n`;
+      }
+      detailedReport += '\n';
+    }
+
+    if (Object.keys(findings).length > 0) {
+      detailedReport += '## Findings\n\n';
+      for (const [issue, files] of Object.entries(findings)) {
+        detailedReport += `### ${issue}\n\n`;
+        detailedReport += `**Affected files (${files.length}):**\n`;
+        files.forEach(file => {
+          detailedReport += `- ${file}\n`;
+        });
+        detailedReport += '\n';
+      }
+    }
+
+    if (suggestions.length > 0) {
+      detailedReport += '## Recommended Actions\n\n';
+      suggestions.forEach((suggestion, index) => {
+        detailedReport += `${index + 1}. ${suggestion}\n`;
+      });
+      detailedReport += '\n';
+    }
+
+    detailedReport += '## Next Steps\n\n';
+    if (errors.length > 0) {
+      detailedReport += '1. Fix all CRITICAL issues listed above before upgrading to Angular 15\n';
+      detailedReport += '2. Run `migration_v15_apply_breaking_changes` after upgrade to automate remaining fixes\n';
+      detailedReport += '3. Review Material Slider usage and plan manual migration\n';
+    } else {
+      detailedReport += '1. Proceed with Angular 15 upgrade\n';
+      detailedReport += '2. Run `migration_v15_apply_breaking_changes` to apply automated MDC fixes\n';
+      detailedReport += '3. Test Material components thoroughly after migration\n';
+    }
+
+    detailedReport += '\n**Documentation:** Read guide://material-mdc-migration for detailed migration instructions\n';
+
+    return {
+      success: true,
+      data: {
+        ...validation,
+        findings,
+        report: detailedReport,
+        ready: errors.length === 0,
+      },
+      message: validation.valid
+        ? 'Project is ready for Material MDC migration'
+        : 'Project has blocking issues for Material MDC migration',
     };
   } catch (error) {
     return {

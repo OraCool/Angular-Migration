@@ -43,6 +43,8 @@ export async function applyBreakingChangeFixes(
   console.log(`🔧 Applying Angular ${version} breaking change fixes...`);
 
   switch (version) {
+    case '15':
+      return await fixAngular15BreakingChanges(projectPath);
     case '16':
       return await fixAngular16BreakingChanges(projectPath);
     case '17':
@@ -59,6 +61,206 @@ export async function applyBreakingChangeFixes(
         warnings: [`No breaking change fixes defined for version ${version}`],
         errors: [],
       };
+  }
+}
+
+/**
+ * Angular 15 Breaking Changes
+ * - Material MDC Pre-Migration fixes (floatLabel, appearance, CSS classes)
+ * - Material Slider detection and diagnostic report
+ * - mat-tab-nav-bar tabPanel requirement detection
+ * - Run official MDC migration schematic
+ */
+async function fixAngular15BreakingChanges(
+  projectPath: string
+): Promise<FixResult> {
+  const changes: string[] = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  try {
+    const srcPath = path.join(projectPath, 'src');
+
+    // 1. Fix floatLabel="never" (CRITICAL - blocks MDC migration)
+    console.log('📝 Fixing floatLabel="never" deprecation...');
+    const floatLabelReplacements: FileReplacement[] = [
+      {
+        pattern: /floatLabel\s*=\s*["']never["']/g,
+        replacement: 'floatLabel="auto"',
+        fileTypes: ['.html'],
+        description: 'Replace floatLabel="never" with "auto" (required for MDC)',
+      },
+    ];
+    const floatLabelChanges = await applyReplacements(
+      srcPath,
+      floatLabelReplacements
+    );
+    changes.push(...floatLabelChanges);
+
+    // 2. Fix appearance="standard" (CRITICAL - blocks MDC migration)
+    console.log('📝 Fixing appearance="standard" deprecation...');
+    const appearanceReplacements: FileReplacement[] = [
+      {
+        pattern: /appearance\s*=\s*["']standard["']/g,
+        replacement: 'appearance="outline"',
+        fileTypes: ['.html'],
+        description: 'Replace appearance="standard" with "outline" (required for MDC)',
+      },
+    ];
+    const appearanceChanges = await applyReplacements(
+      srcPath,
+      appearanceReplacements
+    );
+    changes.push(...appearanceChanges);
+
+    // 3. Update CSS classes (mat-* → mat-mdc-*)
+    console.log('📝 Updating Material CSS classes...');
+    const cssReplacements: FileReplacement[] = [
+      {
+        pattern: /\.mat-form-field-flex\b/g,
+        replacement: '.mat-mdc-form-field-flex',
+        fileTypes: ['.scss', '.css'],
+        description: 'Update form field flex CSS class to MDC',
+      },
+      {
+        pattern: /\.mat-form-field-outline\b/g,
+        replacement: '.mat-mdc-form-field-outline',
+        fileTypes: ['.scss', '.css'],
+        description: 'Update form field outline CSS class to MDC',
+      },
+      {
+        pattern: /\.mat-form-field-infix\b/g,
+        replacement: '.mat-mdc-form-field-infix',
+        fileTypes: ['.scss', '.css'],
+        description: 'Update form field infix CSS class to MDC',
+      },
+    ];
+    const cssChanges = await applyReplacements(srcPath, cssReplacements);
+    changes.push(...cssChanges);
+
+    // 4. Detect mat-tab-nav-bar without [tabPanel] binding (WARNING)
+    console.log('🔍 Checking mat-tab-nav-bar components...');
+    const tabNavFiles = findInFiles(
+      srcPath,
+      /<mat-tab-nav-bar(?![^>]*\[tabPanel\])/,
+      ['.html']
+    );
+    if (tabNavFiles.length > 0) {
+      warnings.push(
+        `Found ${tabNavFiles.length} mat-tab-nav-bar component(s) missing [tabPanel] binding. ` +
+        `This is required in Angular 15+. Add: [tabPanel]="tabPanel" and <mat-tab-nav-panel #tabPanel>`
+      );
+
+      for (const file of tabNavFiles.slice(0, 5)) {
+        warnings.push(`  - ${path.relative(projectPath, file)}`);
+      }
+      if (tabNavFiles.length > 5) {
+        warnings.push(`  ... and ${tabNavFiles.length - 5} more files`);
+      }
+    }
+
+    // 5. Material Slider detection and diagnostic report
+    console.log('🔍 Checking for Material Slider usage...');
+    const sliderFiles = findInFiles(srcPath, /<mat-slider/, ['.html']);
+    if (sliderFiles.length > 0) {
+      warnings.push(
+        `Found ${sliderFiles.length} file(s) using mat-slider. ` +
+        `Material 15 completely rewrote the slider API - manual migration required.`
+      );
+
+      // Generate detailed diagnostic report
+      const sliderReport = await generateSliderDiagnosticReport(
+        projectPath,
+        srcPath,
+        sliderFiles
+      );
+
+      // Save report to project root
+      const reportPath = path.join(projectPath, 'material-slider-migration.md');
+      fs.writeFileSync(reportPath, sliderReport, 'utf8');
+
+      warnings.push(
+        `Slider migration guide created: material-slider-migration.md`
+      );
+
+      // Analyze deprecated properties
+      for (const file of sliderFiles.slice(0, 10)) {
+        const content = fs.readFileSync(file, 'utf8');
+        const deprecatedProps: string[] = [];
+
+        if (/\[tickInterval\]/.test(content)) deprecatedProps.push('tickInterval');
+        if (/\[thumbLabel\]/.test(content)) deprecatedProps.push('thumbLabel');
+        if (/\[vertical\]/.test(content)) deprecatedProps.push('vertical');
+        if (/\[invert\]/.test(content)) deprecatedProps.push('invert');
+        if (/\[displayWith\]/.test(content)) deprecatedProps.push('displayWith');
+
+        if (deprecatedProps.length > 0) {
+          warnings.push(
+            `  ${path.relative(projectPath, file)}: Uses deprecated properties: ${deprecatedProps.join(', ')}`
+          );
+        }
+      }
+
+      if (sliderFiles.length > 10) {
+        warnings.push(`  ... and ${sliderFiles.length - 10} more slider files`);
+      }
+    }
+
+    // 6. Run Material MDC Migration schematic
+    console.log('🔄 Running Material MDC migration schematic...');
+    try {
+      execSync('ng generate @angular/material:mdc-migration --defaults', {
+        cwd: projectPath,
+        stdio: 'inherit',
+      });
+      changes.push('Ran Material MDC migration schematic');
+    } catch (error) {
+      warnings.push(
+        'MDC migration schematic failed or not available. ' +
+        'You may need to run it manually: ng generate @angular/material:mdc-migration'
+      );
+    }
+
+    // 7. Verify no legacy components remain after migration
+    console.log('✅ Verifying legacy components removed...');
+    const legacyComponents = findInFiles(
+      srcPath,
+      /mat-legacy-|MatLegacy/,
+      ['.html', '.ts']
+    );
+    if (legacyComponents.length > 0) {
+      warnings.push(
+        `Found ${legacyComponents.length} file(s) with legacy Material components after migration. ` +
+        `These may need manual review.`
+      );
+
+      for (const file of legacyComponents.slice(0, 5)) {
+        warnings.push(`  - ${path.relative(projectPath, file)}`);
+      }
+      if (legacyComponents.length > 5) {
+        warnings.push(`  ... and ${legacyComponents.length - 5} more files`);
+      }
+    } else {
+      changes.push('Verified: No legacy Material components found');
+    }
+
+    return {
+      success: true,
+      message: 'Angular 15 Material MDC breaking changes fixed successfully',
+      changes,
+      warnings,
+      errors,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    errors.push(errorMessage);
+    return {
+      success: false,
+      message: 'Failed to apply Angular 15 breaking changes',
+      changes,
+      warnings,
+      errors,
+    };
   }
 }
 
@@ -185,7 +387,7 @@ async function fixAngular16BreakingChanges(
 
 /**
  * Angular 17 Breaking Changes
- * - Material MDC Migration (legacy components removed)
+ * - Verify Material MDC Migration completed (legacy components removed in v17)
  * - Control Flow syntax preparation
  * - Form field appearance updates
  */
@@ -199,28 +401,46 @@ async function fixAngular17BreakingChanges(
   try {
     const srcPath = path.join(projectPath, 'src');
 
-    // 1. Run Material MDC Migration Schematic
-    console.log('🔄 Running Material MDC Migration schematic...');
-    try {
-      execSync('ng generate @angular/material:mdc-migration --defaults', {
-        cwd: projectPath,
-        stdio: 'inherit',
-      });
-      changes.push('Ran Material MDC migration schematic');
-    } catch (error) {
-      warnings.push('MDC migration schematic not available or already applied');
-    }
-
-    // 2. Check for remaining legacy components
-    console.log('🔄 Checking for remaining legacy components...');
+    // 1. Verify MDC Migration completed (should have been done in v15)
+    console.log('✅ Verifying Material MDC migration completion...');
     const legacyComponents = findInFiles(
       srcPath,
-      /mat-legacy-/,
+      /mat-legacy-|MatLegacy/,
       ['.html', '.ts']
     );
+
     if (legacyComponents.length > 0) {
-      warnings.push(
-        `Found ${legacyComponents.length} files with legacy components that may need manual migration`
+      errors.push(
+        `ERROR: Found ${legacyComponents.length} legacy Material component(s) in Angular 17. ` +
+        `Legacy components were removed in v17. MDC migration should have been completed in v15.`
+      );
+
+      for (const file of legacyComponents.slice(0, 5)) {
+        errors.push(`  - ${path.relative(projectPath, file)}`);
+      }
+      if (legacyComponents.length > 5) {
+        errors.push(`  ... and ${legacyComponents.length - 5} more files`);
+      }
+
+      errors.push(
+        `Manual action required: Remove all mat-legacy-* imports and components. ` +
+        `See Material MDC migration guide for component replacements.`
+      );
+    } else {
+      changes.push('Verified: No legacy Material components found (MDC migration complete)');
+    }
+
+    // 2. Additional legacy component check in imports
+    console.log('🔄 Checking for legacy Material imports...');
+    const legacyImports = findInFiles(
+      srcPath,
+      /@angular\/material\/legacy-/,
+      ['.ts']
+    );
+    if (legacyImports.length > 0) {
+      errors.push(
+        `Found ${legacyImports.length} file(s) with legacy Material imports. ` +
+        `These must be updated to MDC imports.`
       );
     }
 
@@ -564,4 +784,107 @@ export class ScrollableContainerComponent {
     path.join(componentPath, 'scrollable-container.component.scss'),
     scssContent
   );
+}
+
+/**
+ * Generate Material Slider diagnostic report with migration guidance
+ */
+async function generateSliderDiagnosticReport(
+  projectPath: string,
+  srcPath: string,
+  sliderFiles: string[]
+): Promise<string> {
+  let report = '# Material Slider Migration Guide (Angular 15)\n\n';
+  report += '## Overview\n\n';
+  report += 'Material Slider was completely rewritten in Angular 15 with a new API.\n';
+  report += 'This report analyzes your slider usage and provides migration guidance.\n\n';
+  report += '## Files Requiring Migration\n\n';
+  report += `Found ${sliderFiles.length} file(s) using mat-slider:\n\n`;
+
+  for (const file of sliderFiles) {
+    const content = fs.readFileSync(file, 'utf8');
+    const relativePath = path.relative(projectPath, file);
+
+    report += `### ${relativePath}\n\n`;
+
+    // Detect deprecated properties
+    const deprecatedProps: string[] = [];
+    if (/\[tickInterval\]/.test(content)) deprecatedProps.push('tickInterval');
+    if (/\[thumbLabel\]/.test(content)) deprecatedProps.push('thumbLabel');
+    if (/\[vertical\]/.test(content)) deprecatedProps.push('vertical');
+    if (/\[invert\]/.test(content)) deprecatedProps.push('invert');
+    if (/\[displayWith\]/.test(content)) deprecatedProps.push('displayWith');
+
+    if (deprecatedProps.length > 0) {
+      report += '**Deprecated Properties Used:**\n';
+      for (const prop of deprecatedProps) {
+        report += `- \`[${prop}]\`\n`;
+      }
+      report += '\n';
+    }
+
+    report += '**Migration Steps:**\n\n';
+    report += '1. Add `<input matSliderThumb>` inside `<mat-slider>`\n';
+    report += '2. Move `[(ngModel)]` or `[value]` from `<mat-slider>` to `<input matSliderThumb>`\n';
+    report += '3. Move event bindings to `<input matSliderThumb>`\n';
+
+    // Specific migration guidance for deprecated properties
+    if (deprecatedProps.includes('tickInterval')) {
+      report += '4. Replace `[tickInterval]` with `discrete` attribute and `showTickMarks` on slider\n';
+    }
+    if (deprecatedProps.includes('thumbLabel')) {
+      report += '4. Remove `[thumbLabel]` - thumb label is always shown for discrete sliders\n';
+    }
+    if (deprecatedProps.includes('vertical')) {
+      report += '4. **WARNING**: `[vertical]` is not supported in Angular 15 - horizontal only\n';
+    }
+    if (deprecatedProps.includes('invert')) {
+      report += '4. **WARNING**: `[invert]` is not supported in Angular 15\n';
+    }
+    if (deprecatedProps.includes('displayWith')) {
+      report += '4. Replace `[displayWith]` with a custom formatter in your component\n';
+    }
+
+    report += '\n**Before/After Example:**\n\n';
+    report += '```html\n';
+    report += '<!-- BEFORE (Angular 14) -->\n';
+    report += '<mat-slider\n';
+    report += '  [min]="0"\n';
+    report += '  [max]="100"\n';
+    if (deprecatedProps.includes('tickInterval')) {
+      report += '  [tickInterval]="1"\n';
+    }
+    if (deprecatedProps.includes('thumbLabel')) {
+      report += '  [thumbLabel]="true"\n';
+    }
+    report += '  [(ngModel)]="value">\n';
+    report += '</mat-slider>\n\n';
+    report += '<!-- AFTER (Angular 15) -->\n';
+    report += '<mat-slider\n';
+    report += '  [min]="0"\n';
+    report += '  [max]="100"';
+    if (deprecatedProps.includes('tickInterval')) {
+      report += '\n  discrete\n  showTickMarks';
+    }
+    report += '>\n';
+    report += '  <input matSliderThumb [(ngModel)]="value">\n';
+    report += '</mat-slider>\n';
+    report += '```\n\n';
+  }
+
+  report += '## Additional Resources\n\n';
+  report += '- [Official Material Slider Documentation](https://material.angular.io/components/slider/overview)\n';
+  report += '- [Material 15 Migration Guide](https://material.angular.io/guide/mdc-migration)\n';
+  report += '- [Slider API Reference](https://material.angular.io/components/slider/api)\n\n';
+
+  report += '## Testing Checklist\n\n';
+  report += 'After migration, verify:\n\n';
+  report += '- [ ] Slider values bind correctly\n';
+  report += '- [ ] Min/max ranges work as expected\n';
+  report += '- [ ] Step increments function properly\n';
+  report += '- [ ] Event handlers fire correctly\n';
+  report += '- [ ] Visual appearance matches design requirements\n';
+  report += '- [ ] Accessibility (keyboard navigation, ARIA labels) works\n';
+
+  return report;
 }
